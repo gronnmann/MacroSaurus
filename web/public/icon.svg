@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="icon-title">
+  <title id="icon-title">Macrosaurus dinosaur footprint</title>
+  <rect width="128" height="128" rx="30" fill="#0d2e1a"/>
+  <path d="M26 79c9-25 24-38 47-38 9 0 17 2 23 7l-11 7 17 5-13 7c1 13-6 23-22 27l-5-17-9 17H37l4-20z" fill="#77d177"/>
+  <circle cx="79" cy="49" r="3" fill="#0d2e1a"/>
+  <path d="M91 35l8-8 3 12zM102 47l11-2-6 11z" fill="#ff8c2a"/>
+</svg>

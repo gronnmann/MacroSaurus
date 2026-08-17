@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" role="img" aria-label="Macrosaurus footprint">
+  <g fill="#43b05c" stroke="#1e4d2b" stroke-width="2.5" stroke-linejoin="round">
+    <path d="M13 23C7 16 8 7 14 4c6-2 11 5 10 12-1 6-6 11-11 7Z"/>
+    <path d="M29 16C27 7 31 1 37 2c7 2 7 11 3 18-4 6-10 3-11-4Z"/>
+    <path d="M47 25c-1-8 4-14 10-11 6 3 5 12 0 18-5 5-10 0-10-7Z"/>
+    <path d="M13 49c2-15 11-24 21-23 12 1 19 14 18 27-1 12-9 17-20 16C19 68 11 61 13 49Z"/>
+  </g>
+</svg>

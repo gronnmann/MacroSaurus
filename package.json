@@ -1,0 +1,14 @@
+{
+    "name": "macrosaurus",
+    "private": true,
+    "packageManager": "pnpm@10.25.0",
+    "scripts": {
+        "prepare": "husky",
+        "format": "pnpm --dir web format && node scripts/run-gradle.mjs :backend:spotlessApply",
+        "format:check": "pnpm --dir web format:check && node scripts/run-gradle.mjs :backend:spotlessCheck",
+        "quality": "pnpm --dir web quality && node scripts/run-gradle.mjs :backend:check"
+    },
+    "devDependencies": {
+        "husky": "^9.1.7"
+    }
+}

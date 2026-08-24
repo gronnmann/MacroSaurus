@@ -11,9 +11,11 @@ import com.macrosaurus.shared.NotFoundException
 import com.macrosaurus.shared.SourceKind
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Pattern
+import jakarta.validation.constraints.Size
 import org.jooq.DSLContext
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.http.MediaType
+import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
@@ -26,6 +28,8 @@ import org.springframework.web.client.RestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.math.BigDecimal
+import java.time.Clock
+import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -33,6 +37,8 @@ import java.util.UUID
 data class OpenFoodFactsProperties(
     val baseUrl: String,
     val userAgent: String,
+    val connectTimeout: Duration = Duration.ofSeconds(5),
+    val readTimeout: Duration = Duration.ofSeconds(15),
 )
 
 @ConfigurationProperties("macrosaurus.open-router")
@@ -40,6 +46,8 @@ data class OpenRouterProperties(
     val baseUrl: String,
     val apiKey: String,
     val model: String,
+    val connectTimeout: Duration = Duration.ofSeconds(5),
+    val readTimeout: Duration = Duration.ofSeconds(90),
 )
 
 data class BarcodeCandidate(
@@ -58,52 +66,52 @@ class OpenFoodFactsClient(
     private val mapper: ObjectMapper,
 ) {
     private val userAgent = properties.userAgent
-    private val client = RestClient.builder().baseUrl(properties.baseUrl).build()
+    private val client = restClient(properties.baseUrl, properties.connectTimeout, properties.readTimeout)
 
     fun find(barcode: String): BarcodeCandidate? {
-        val payload =
-            try {
+        return try {
+            val payload =
                 client
                     .get()
                     .uri("/api/v3/product/{barcode}.json?fields=code,product_name,brands,nutriments", barcode)
                     .header("User-Agent", userAgent)
                     .retrieve()
-                    .body(String::class.java)
-            } catch (error: Exception) {
-                throw ExternalServiceException("Open Food Facts lookup failed", error)
-            } ?: return null
-        val root = mapper.readTree(payload)
-        if (root.path("status").asInt(0) != 1) return null
-        val product = root.path("product")
-        val name = product.path("product_name").asText("").ifBlank { return null }
-        val nutriments = product.path("nutriments")
+                    .body(String::class.java) ?: return null
+            val root = mapper.readTree(payload)
+            if (root.path("status").asInt(0) != 1) return null
+            val product = root.path("product")
+            val name = product.path("product_name").asString("").ifBlank { return null }
+            val nutriments = product.path("nutriments")
 
-        fun decimal(key: String): BigDecimal? =
-            nutriments
-                .path(key)
-                .takeUnless(JsonNode::isMissingNode)
-                ?.takeUnless(JsonNode::isNull)
-                ?.decimalValue()
-        val nutrients =
-            linkedMapOf<String, BigDecimal>().apply {
-                decimal("energy-kcal_100g")?.let { put("energy_kcal", it) }
-                decimal("proteins_100g")?.let { put("protein_g", it) }
-                decimal("carbohydrates_100g")?.let { put("carbohydrate_g", it) }
-                decimal("fat_100g")?.let { put("fat_g", it) }
-                decimal("fiber_100g")?.let { put("fiber_g", it) }
-                decimal("sugars_100g")?.let { put("sugars_g", it) }
-                decimal("saturated-fat_100g")?.let { put("saturated_fat_g", it) }
-                decimal("sodium_100g")?.multiply(BigDecimal("1000"))?.let { put("sodium_mg", it) }
-            }
-        return BarcodeCandidate(
-            barcode,
-            name,
-            product.path("brands").asText("").ifBlank { null },
-            SourceKind.OPEN_FOOD_FACTS,
-            BasisType.PER_100_G,
-            nutrients,
-            barcode,
-        )
+            fun decimal(key: String): BigDecimal? =
+                nutriments
+                    .path(key)
+                    .takeUnless(JsonNode::isMissingNode)
+                    ?.takeUnless(JsonNode::isNull)
+                    ?.decimalValue()
+            val nutrients =
+                linkedMapOf<String, BigDecimal>().apply {
+                    decimal("energy-kcal_100g")?.let { put("energy_kcal", it) }
+                    decimal("proteins_100g")?.let { put("protein_g", it) }
+                    decimal("carbohydrates_100g")?.let { put("carbohydrate_g", it) }
+                    decimal("fat_100g")?.let { put("fat_g", it) }
+                    decimal("fiber_100g")?.let { put("fiber_g", it) }
+                    decimal("sugars_100g")?.let { put("sugars_g", it) }
+                    decimal("saturated-fat_100g")?.let { put("saturated_fat_g", it) }
+                    decimal("sodium_100g")?.multiply(BigDecimal("1000"))?.let { put("sodium_mg", it) }
+                }
+            BarcodeCandidate(
+                barcode,
+                name,
+                product.path("brands").asString("").ifBlank { null },
+                SourceKind.OPEN_FOOD_FACTS,
+                BasisType.PER_100_G,
+                nutrients,
+                barcode,
+            )
+        } catch (error: Exception) {
+            throw ExternalServiceException("Open Food Facts lookup failed", error)
+        }
     }
 }
 
@@ -116,7 +124,7 @@ class BarcodeService(
         userId: String,
         rawBarcode: String,
     ): List<BarcodeCandidate> {
-        val barcode = normalizeAndValidate(rawBarcode)
+        val barcode = Barcode.normalizeAndValidate(rawBarcode)
         val local =
             catalog.search(userId, barcode, 20).filter { it.barcode == barcode }.map {
                 BarcodeCandidate(barcode, it.name, it.brand, it.source, it.basisType, it.nutrients, it.id.toString())
@@ -128,8 +136,9 @@ class BarcodeService(
         userId: String,
         rawBarcode: String,
     ): com.macrosaurus.catalog.FoodView {
-        val barcode = normalizeAndValidate(rawBarcode)
-        val candidate = find(userId, barcode).firstOrNull() ?: throw NotFoundException("Barcode was not found")
+        val barcode = Barcode.normalizeAndValidate(rawBarcode)
+        catalog.search(userId, barcode, 20).firstOrNull { it.barcode == barcode }?.let { return it }
+        val candidate = off.find(barcode) ?: throw NotFoundException("Barcode was not found")
         return catalog.create(
             userId,
             CreateFoodRequest(
@@ -145,25 +154,12 @@ class BarcodeService(
             candidate.externalId,
         )
     }
-
-    private fun normalizeAndValidate(raw: String): String {
-        val code = raw.filter(Char::isDigit)
-        if (code.length !in setOf(8, 12, 13, 14)) throw InvalidOperationException("EAN/UPC must contain 8, 12, 13, or 14 digits")
-        val check =
-            code
-                .dropLast(1)
-                .reversed()
-                .mapIndexed { index, char ->
-                    char.digitToInt() * if (index % 2 == 0) 3 else 1
-                }.sum()
-        val expected = (10 - check % 10) % 10
-        if (expected != code.last().digitToInt()) throw InvalidOperationException("EAN/UPC checksum is invalid")
-        return code
-    }
 }
 
 data class StartLabelScanRequest(
-    @field:Pattern(regexp = "^data:image/(jpeg|png|webp);base64,.+") val image: String,
+    @field:Pattern(regexp = "^data:image/(jpeg|png|webp);base64,.+")
+    @field:Size(max = 12_000_000)
+    val image: String,
     val barcode: String? = null,
     val localeHint: String? = null,
 )
@@ -204,7 +200,7 @@ class OpenRouterLabelExtractor(
     private val properties: OpenRouterProperties,
     private val mapper: ObjectMapper,
 ) {
-    private val client = RestClient.builder().baseUrl(properties.baseUrl).build()
+    private val client = restClient(properties.baseUrl, properties.connectTimeout, properties.readTimeout)
 
     fun extract(request: StartLabelScanRequest): LabelDraft {
         if (properties.apiKey.isBlank()) throw InvalidOperationException("OPENROUTER_API_KEY is not configured")
@@ -304,16 +300,24 @@ class OpenRouterLabelExtractor(
             } catch (error: Exception) {
                 throw ExternalServiceException("Label extraction failed", error)
             } ?: throw ExternalServiceException("Label extraction returned no response")
-        val contentJson =
-            mapper
-                .readTree(response)
-                .path("choices")
-                .path(0)
-                .path("message")
-                .path("content")
-                .asText()
-        if (contentJson.isBlank()) throw ExternalServiceException("Label extraction returned no structured content")
-        return mapper.readValue(contentJson, LabelDraft::class.java)
+        return try {
+            val contentJson =
+                mapper
+                    .readTree(response)
+                    .path("choices")
+                    .path(0)
+                    .path("message")
+                    .path("content")
+                    .asString()
+            if (contentJson.isBlank()) {
+                throw ExternalServiceException("Label extraction returned no structured content")
+            }
+            mapper.readValue(contentJson, LabelDraft::class.java)
+        } catch (error: ExternalServiceException) {
+            throw error
+        } catch (error: Exception) {
+            throw ExternalServiceException("Label extraction returned malformed structured content", error)
+        }
     }
 
     private fun nullableString() = mapOf("type" to listOf("string", "null"))
@@ -327,14 +331,14 @@ class ScanService(
     private val json: JsonCodec,
     private val extractor: OpenRouterLabelExtractor,
     private val catalog: CatalogService,
+    private val clock: Clock,
 ) {
-    @Transactional
     fun start(
         userId: String,
         request: StartLabelScanRequest,
     ): ScanJobView {
         val id = UUID.randomUUID()
-        val expires = OffsetDateTime.now().plusHours(24)
+        val expires = OffsetDateTime.now(clock).plusHours(24)
         db.execute(
             "insert into scan_jobs(id, user_id, status, expires_at) values (?, ?, 'PROCESSING', cast(? as timestamptz))",
             id,
@@ -382,6 +386,23 @@ class ScanService(
         db.execute("update scan_jobs set status = 'CONFIRMED', result = null where id = ? and user_id = ?", id, userId)
         return food
     }
+}
+
+private fun restClient(
+    baseUrl: String,
+    connectTimeout: Duration,
+    readTimeout: Duration,
+): RestClient {
+    val requestFactory =
+        SimpleClientHttpRequestFactory().apply {
+            setConnectTimeout(connectTimeout)
+            setReadTimeout(readTimeout)
+        }
+    return RestClient
+        .builder()
+        .baseUrl(baseUrl)
+        .requestFactory(requestFactory)
+        .build()
 }
 
 @RestController

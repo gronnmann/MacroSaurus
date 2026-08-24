@@ -45,12 +45,14 @@ weigh-ins, and barcode acquisition; new entries use the current instant.
 
 - `dev` marks the local user as authenticated and sends `VITE_DEV_USER_ID` as
   `X-User-Id`.
-- `auth0` configures `@auth0/auth0-react`, obtains an access token for the API
-  audience, and restores the route requested before login.
+- `supabase` configures `@supabase/supabase-js` for Auth operations only, restores
+  and refreshes the session, and restores the route requested before login.
 
 All application routes use the protected layout. `/shared/:token` uses a public
 layout and never requires a session. A production deployment must configure the
-frontend and backend for the same Auth0 API audience.
+frontend and backend for the same Supabase project. The browser sends the
+Supabase access token only to the Macrosaurus backend; it does not query the
+Supabase Data API.
 
 ## Data and error rules
 

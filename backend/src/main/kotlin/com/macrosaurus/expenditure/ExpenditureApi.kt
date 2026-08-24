@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.Clock
 import java.time.LocalDate
 import java.time.Period
 import java.time.temporal.ChronoUnit
@@ -37,10 +38,11 @@ class ExpenditureService(
     private val profiles: ProfileService,
     private val measurements: MeasurementService,
     private val tracking: TrackingService,
+    private val clock: Clock,
 ) {
     fun estimate(
         userId: String,
-        date: LocalDate = LocalDate.now(),
+        date: LocalDate = LocalDate.now(clock),
         persist: Boolean = false,
     ): EnergyEstimateView {
         val profile = profiles.get(userId)
@@ -51,20 +53,17 @@ class ExpenditureService(
         val baseline =
             if (profile?.heightCm != null && profile.formulaSex != null && age != null && age >= 18 && latest != null) {
                 val sexAdjustment =
-                    when (profile.formulaSex.uppercase()) {
-                        "MALE" -> BigDecimal("5")
-                        "FEMALE" -> BigDecimal("-161")
-                        else -> null
+                    when (profile.formulaSex) {
+                        com.macrosaurus.identity.FormulaSex.MALE -> BigDecimal("5")
+                        com.macrosaurus.identity.FormulaSex.FEMALE -> BigDecimal("-161")
                     }
-                sexAdjustment?.let {
-                    BigDecimal("10")
-                        .multiply(latest.weightKg)
-                        .add(BigDecimal("6.25").multiply(profile.heightCm))
-                        .subtract(BigDecimal("5").multiply(BigDecimal(age)))
-                        .add(it)
-                        .multiply(profile.activityMultiplier)
-                        .setScale(2, RoundingMode.HALF_UP)
-                }
+                BigDecimal("10")
+                    .multiply(latest.weightKg)
+                    .add(BigDecimal("6.25").multiply(profile.heightCm))
+                    .subtract(BigDecimal("5").multiply(BigDecimal(age)))
+                    .add(sexAdjustment)
+                    .multiply(profile.activityMultiplier)
+                    .setScale(2, RoundingMode.HALF_UP)
             } else {
                 null
             }
@@ -167,5 +166,5 @@ class ExpenditureController(
     fun current(
         @RequestParam(required = false) date: LocalDate?,
         @RequestParam(defaultValue = "false") persist: Boolean,
-    ) = expenditure.estimate(users.userId(), date ?: LocalDate.now(), persist)
+    ) = date?.let { expenditure.estimate(users.userId(), it, persist) } ?: expenditure.estimate(users.userId(), persist = persist)
 }

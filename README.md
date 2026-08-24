@@ -54,7 +54,8 @@ Food and weight entries use the current date and time automatically.
 - Docker Desktop, or another Docker Compose-compatible runtime
 - Node.js 24+
 - pnpm 10.25.0
-- Java 17+ to launch Gradle; the wrapper provisions the Java 26 toolchain
+- JDK 26
+- Maven 3.9+
 
 From the repository root:
 
@@ -66,7 +67,7 @@ pnpm install --frozen-lockfile
 docker compose up -d postgres
 
 # 3. Start the Spring API
-.\gradlew.bat :backend:bootRun
+mvn -pl backend spring-boot:run
 ```
 
 In a second terminal:
@@ -78,8 +79,6 @@ pnpm --dir web dev
 
 Open **http://localhost:5173**. The API runs at **http://localhost:8080** and
 Swagger UI is available at **http://localhost:8080/swagger-ui.html**.
-
-On macOS or Linux, use `./gradlew` instead of `.\gradlew.bat`.
 
 ### Verify the services
 
@@ -98,7 +97,7 @@ Expected health response:
 
 The local build uses development identity mode by default. Copy
 `web/.env.example` to `web/.env.local` if you want to set an explicit local user.
-Production Auth0 configuration is covered in [Configuration](docs/configuration.md).
+Production Supabase configuration is covered in [Configuration](docs/configuration.md).
 
 ## Development commands
 
@@ -106,7 +105,7 @@ The root commands are the normal development entry points:
 
 | Command | What it does |
 |---|---|
-| `pnpm format` | Formats Kotlin, Gradle, TypeScript, React, CSS, and JSON |
+| `pnpm format` | Formats Kotlin, TypeScript, React, CSS, and JSON |
 | `pnpm format:check` | Verifies formatting without changing files |
 | `pnpm quality` | Runs Biome, TypeScript, ktlint, backend tests, and module-boundary checks |
 | `pnpm --dir web test` | Runs frontend unit/component tests |
@@ -117,6 +116,21 @@ The root commands are the normal development entry points:
 `pnpm install` enables the tracked Husky pre-commit hook. Every commit must pass
 `pnpm quality`. Editors also inherit the repository-wide four-space policy from
 `.editorconfig`.
+
+## Deploy a published image
+
+Pushes to `main` and `v*` tags publish multi-platform backend and web images to
+GitHub Container Registry after the quality checks pass. On a configured host:
+
+```bash
+cp .env.production.example .env.production
+# Fill in .env.production, then deploy a published tag:
+./scripts/deploy.sh main
+```
+
+Use an immutable release tag such as `v0.2.0` for production. See the
+[deployment tutorial](docs/deployment.md) for required GitHub variables, private
+registry login, HTTPS setup, updates, and rollback.
 
 ## Architecture
 

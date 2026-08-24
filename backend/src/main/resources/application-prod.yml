@@ -1,0 +1,17 @@
+macrosaurus:
+  security:
+    supabase-url: ${SUPABASE_URL}
+    audience: authenticated
+    dev-mode: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

@@ -12,6 +12,8 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.NotBlank
 import org.jooq.DSLContext
+import org.jooq.impl.DSL.field
+import org.jooq.impl.DSL.table
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
@@ -142,7 +144,7 @@ class CatalogService(
                 term,
                 query.trim(),
                 limit.coerceIn(1, 100),
-            ).map { foodFromRecord(it) }
+            ).let(::foodsFromRecords)
     }
 
     fun get(
@@ -162,7 +164,7 @@ class CatalogService(
                 foodId,
                 userId,
             ) ?: throw NotFoundException("Food was not found")
-        return foodFromRecord(record)
+        return foodsFromRecords(listOf(record)).single()
     }
 
     fun byRevision(
@@ -181,7 +183,38 @@ class CatalogService(
                 revisionId,
                 userId,
             ) ?: throw NotFoundException("Food revision was not found")
-        return foodFromRecord(record)
+        return foodsFromRecords(listOf(record)).single()
+    }
+
+    fun byRevisions(
+        userId: String,
+        revisionIds: Collection<UUID>,
+    ): Map<UUID, FoodView> {
+        if (revisionIds.isEmpty()) return emptyMap()
+        val records =
+            db
+                .select(
+                    field("f.id").`as`("id"),
+                    field("fr.id").`as`("revision_id"),
+                    field("fr.revision").`as`("revision"),
+                    field("fr.name").`as`("name"),
+                    field("fr.brand").`as`("brand"),
+                    field("f.barcode").`as`("barcode"),
+                    field("f.source_kind").`as`("source_kind"),
+                    field("fr.basis_type").`as`("basis_type"),
+                    field("fr.basis_amount").`as`("basis_amount"),
+                    field("fr.basis_unit").`as`("basis_unit"),
+                    field("fr.density_g_per_ml").`as`("density_g_per_ml"),
+                    field("fr.created_at").`as`("created_at"),
+                ).from(table("foods f"))
+                .join(table("food_revisions fr"))
+                .on(field("fr.food_id").eq(field("f.id")))
+                .where(field("fr.id", UUID::class.java).`in`(revisionIds))
+                .and(field("f.source_kind").ne("USER").or(field("f.owner_user_id", String::class.java).eq(userId)))
+                .fetch()
+        val foods = foodsFromRecords(records)
+        if (foods.size != revisionIds.toSet().size) throw NotFoundException("One or more food revisions were not found")
+        return foods.associateBy(FoodView::revisionId)
     }
 
     @Transactional
@@ -212,6 +245,15 @@ class CatalogService(
         foodId: UUID,
         request: CreateFoodRequest,
     ): FoodView {
+        val owned =
+            db
+                .selectOne()
+                .from(table("foods"))
+                .where(field("id", UUID::class.java).eq(foodId))
+                .and(field("owner_user_id", String::class.java).eq(userId))
+                .forUpdate()
+                .fetchOne()
+        if (owned == null) throw NotFoundException("Food was not found")
         val existing = get(userId, foodId)
         if (existing.source != SourceKind.USER) throw ForbiddenException("External source foods cannot be edited")
         validateBasis(request)
@@ -338,9 +380,6 @@ class CatalogService(
             )
         }
         request.portions.forEach { portion ->
-            if (portion.gramWeight == null && portion.milliliterVolume == null) {
-                throw InvalidOperationException("Named portions need a gram weight or milliliter volume")
-            }
             db.execute(
                 """
                 insert into portions(
@@ -359,6 +398,43 @@ class CatalogService(
     }
 
     private fun validateBasis(request: CreateFoodRequest) {
+        if (request.name.isBlank()) throw InvalidOperationException("Food name is required")
+        if (request.basisAmount <= BigDecimal.ZERO) throw InvalidOperationException("Food basis amount must be positive")
+        if (request.densityGPerMl != null && request.densityGPerMl <= BigDecimal.ZERO) {
+            throw InvalidOperationException("Food density must be positive")
+        }
+        if (request.nutrients.values.any { it < BigDecimal.ZERO }) {
+            throw InvalidOperationException("Nutrient values cannot be negative")
+        }
+        val knownNutrients =
+            if (request.nutrients.isEmpty()) {
+                emptySet()
+            } else {
+                db
+                    .select(field("code", String::class.java))
+                    .from(table("nutrient_definitions"))
+                    .where(field("code", String::class.java).`in`(request.nutrients.keys))
+                    .fetchSet(field("code", String::class.java))
+            }
+        val unknownNutrients = request.nutrients.keys - knownNutrients
+        if (unknownNutrients.isNotEmpty()) {
+            throw InvalidOperationException("Unknown nutrient codes: ${unknownNutrients.sorted().joinToString()}")
+        }
+        if (request.portions.count(PortionInput::default) > 1) {
+            throw InvalidOperationException("Only one named portion can be the default")
+        }
+        request.portions.forEach { portion ->
+            if (portion.name.isBlank()) throw InvalidOperationException("Named portion name is required")
+            if (portion.quantity <= BigDecimal.ZERO) throw InvalidOperationException("Named portion quantity must be positive")
+            if (portion.gramWeight == null && portion.milliliterVolume == null) {
+                throw InvalidOperationException("Named portions need a gram weight or milliliter volume")
+            }
+            if (portion.gramWeight?.let { it <= BigDecimal.ZERO } == true ||
+                portion.milliliterVolume?.let { it <= BigDecimal.ZERO } == true
+            ) {
+                throw InvalidOperationException("Named portion measurements must be positive")
+            }
+        }
         when (request.basisType) {
             BasisType.PER_100_G -> {
                 if (request.basisUnit.lowercase() !in setOf("g", "gram", "grams")) {
@@ -372,56 +448,63 @@ class CatalogService(
                 }
             }
 
-            BasisType.PER_SERVING -> {
-                Unit
-            }
+            BasisType.PER_SERVING -> {}
         }
     }
 
-    private fun foodFromRecord(record: org.jooq.Record): FoodView {
-        val revisionId = record.get("revision_id", UUID::class.java)!!
+    private fun foodsFromRecords(records: List<org.jooq.Record>): List<FoodView> {
+        if (records.isEmpty()) return emptyList()
+        val revisionIds = records.map { it.get("revision_id", UUID::class.java)!! }
         val nutrients =
             db
-                .fetch(
-                    "select nutrient_code, amount from food_nutrients where food_revision_id = ?",
-                    revisionId,
-                ).associate { it.get("nutrient_code", String::class.java)!! to it.get("amount", BigDecimal::class.java)!! }
+                .select(
+                    field("food_revision_id", UUID::class.java),
+                    field("nutrient_code", String::class.java),
+                    field("amount", BigDecimal::class.java),
+                ).from(table("food_nutrients"))
+                .where(field("food_revision_id", UUID::class.java).`in`(revisionIds))
+                .fetch()
+                .groupBy { it.value1() }
+                .mapValues { (_, values) -> values.associate { it.value2() to it.value3() } }
         val portions =
             db
-                .fetch(
-                    """
-                    select id, name, quantity, gram_weight, milliliter_volume, is_default
-                      from portions
-                     where food_revision_id = ?
-                     order by is_default desc, name
-                    """.trimIndent(),
-                    revisionId,
-                ).map {
-                    PortionView(
-                        it.get("id", UUID::class.java)!!,
-                        it.get("name", String::class.java)!!,
-                        it.get("quantity", BigDecimal::class.java)!!,
-                        it.get("gram_weight", BigDecimal::class.java),
-                        it.get("milliliter_volume", BigDecimal::class.java),
-                        it.get("is_default", Boolean::class.java) ?: false,
-                    )
+                .select(
+                    field("food_revision_id", UUID::class.java),
+                    field("id", UUID::class.java),
+                    field("name", String::class.java),
+                    field("quantity", BigDecimal::class.java),
+                    field("gram_weight", BigDecimal::class.java),
+                    field("milliliter_volume", BigDecimal::class.java),
+                    field("is_default", Boolean::class.java),
+                ).from(table("portions"))
+                .where(field("food_revision_id", UUID::class.java).`in`(revisionIds))
+                .orderBy(field("is_default").desc(), field("name"))
+                .fetch()
+                .groupBy { it.value1() }
+                .mapValues { (_, values) ->
+                    values.map {
+                        PortionView(it.value2(), it.value3(), it.value4(), it.value5(), it.value6(), it.value7() ?: false)
+                    }
                 }
-        return FoodView(
-            record.get("id", UUID::class.java)!!,
-            revisionId,
-            record.get("revision", Int::class.java)!!,
-            record.get("name", String::class.java)!!,
-            record.get("brand", String::class.java),
-            record.get("barcode", String::class.java),
-            SourceKind.valueOf(record.get("source_kind", String::class.java)!!),
-            BasisType.valueOf(record.get("basis_type", String::class.java)!!),
-            record.get("basis_amount", BigDecimal::class.java)!!,
-            record.get("basis_unit", String::class.java)!!,
-            record.get("density_g_per_ml", BigDecimal::class.java),
-            nutrients,
-            portions,
-            record.get("created_at", OffsetDateTime::class.java)!!,
-        )
+        return records.map { record ->
+            val revisionId = record.get("revision_id", UUID::class.java)!!
+            FoodView(
+                record.get("id", UUID::class.java)!!,
+                revisionId,
+                record.get("revision", Int::class.java)!!,
+                record.get("name", String::class.java)!!,
+                record.get("brand", String::class.java),
+                record.get("barcode", String::class.java),
+                SourceKind.valueOf(record.get("source_kind", String::class.java)!!),
+                BasisType.valueOf(record.get("basis_type", String::class.java)!!),
+                record.get("basis_amount", BigDecimal::class.java)!!,
+                record.get("basis_unit", String::class.java)!!,
+                record.get("density_g_per_ml", BigDecimal::class.java),
+                nutrients[revisionId].orEmpty(),
+                portions[revisionId].orEmpty(),
+                record.get("created_at", OffsetDateTime::class.java)!!,
+            )
+        }
     }
 
     private fun normalizeBarcode(barcode: String?): String? = barcode?.filter(Char::isDigit)?.takeIf { it.isNotBlank() }

@@ -1,5 +1,7 @@
 package com.macrosaurus.identity
 
+import com.macrosaurus.shared.InvalidOperationException
+import com.macrosaurus.shared.UnitSystem
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMax
 import jakarta.validation.constraints.DecimalMin
@@ -15,17 +17,22 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Locale
+
+enum class FormulaSex { MALE, FEMALE }
 
 data class ProfileView(
     val userId: String,
     val displayName: String,
     val locale: String,
     val timezone: String,
-    val unitSystem: String,
+    val unitSystem: UnitSystem,
     val birthDate: LocalDate?,
     val heightCm: BigDecimal?,
-    val formulaSex: String?,
+    val formulaSex: FormulaSex?,
     val activityMultiplier: BigDecimal,
 )
 
@@ -33,16 +40,17 @@ data class UpdateProfileRequest(
     @field:NotBlank val displayName: String,
     @field:NotBlank val locale: String = "en",
     @field:NotBlank val timezone: String = "UTC",
-    val unitSystem: String = "METRIC",
+    val unitSystem: UnitSystem = UnitSystem.METRIC,
     val birthDate: LocalDate? = null,
     @field:DecimalMin("30") @field:DecimalMax("300") val heightCm: BigDecimal? = null,
-    val formulaSex: String? = null,
+    val formulaSex: FormulaSex? = null,
     @field:DecimalMin("1.0") @field:DecimalMax("2.5") val activityMultiplier: BigDecimal = BigDecimal("1.2"),
 )
 
 @Service
 class ProfileService(
     private val db: DSLContext,
+    private val clock: Clock,
 ) {
     fun get(userId: String): ProfileView? =
         db
@@ -60,13 +68,24 @@ class ProfileService(
             .where(field("user_id").eq(userId))
             .fetchOne()
             ?.let {
-                ProfileView(it.value1(), it.value2(), it.value3(), it.value4(), it.value5(), it.value6(), it.value7(), it.value8(), it.value9())
+                ProfileView(
+                    it.value1(),
+                    it.value2(),
+                    it.value3(),
+                    it.value4(),
+                    UnitSystem.valueOf(it.value5()),
+                    it.value6(),
+                    it.value7(),
+                    it.value8()?.let(FormulaSex::valueOf),
+                    it.value9(),
+                )
             }
 
     fun upsert(
         userId: String,
         request: UpdateProfileRequest,
     ): ProfileView {
+        validate(request)
         db
             .insertInto(table("user_profiles"))
             .columns(
@@ -84,24 +103,35 @@ class ProfileService(
                 request.displayName,
                 request.locale,
                 request.timezone,
-                request.unitSystem,
+                request.unitSystem.name,
                 request.birthDate,
                 request.heightCm,
-                request.formulaSex,
+                request.formulaSex?.name,
                 request.activityMultiplier,
             ).onConflict(field("user_id"))
             .doUpdate()
             .set(field("display_name"), request.displayName)
             .set(field("locale"), request.locale)
             .set(field("timezone"), request.timezone)
-            .set(field("unit_system"), request.unitSystem)
+            .set(field("unit_system"), request.unitSystem.name)
             .set(field("birth_date"), request.birthDate)
             .set(field("height_cm"), request.heightCm)
-            .set(field("formula_sex"), request.formulaSex)
+            .set(field("formula_sex"), request.formulaSex?.name)
             .set(field("activity_multiplier"), request.activityMultiplier)
             .set(field("updated_at"), currentOffsetDateTime())
             .execute()
         return requireNotNull(get(userId))
+    }
+
+    private fun validate(request: UpdateProfileRequest) {
+        runCatching { ZoneId.of(request.timezone) }
+            .getOrElse { throw InvalidOperationException("Unknown profile timezone") }
+        if (Locale.forLanguageTag(request.locale).language.isBlank()) {
+            throw InvalidOperationException("Unknown profile locale")
+        }
+        if (request.birthDate?.isAfter(LocalDate.now(clock)) == true) {
+            throw InvalidOperationException("Birth date cannot be in the future")
+        }
     }
 }
 
@@ -114,7 +144,7 @@ class ProfileController(
     @GetMapping
     fun get(): ProfileView =
         profiles.get(users.userId())
-            ?: ProfileView(users.userId(), "Macrosaurus user", "en", "UTC", "METRIC", null, null, null, BigDecimal("1.2"))
+            ?: ProfileView(users.userId(), "Macrosaurus user", "en", "UTC", UnitSystem.METRIC, null, null, null, BigDecimal("1.2"))
 
     @PutMapping
     fun update(

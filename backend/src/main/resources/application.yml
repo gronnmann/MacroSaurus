@@ -20,6 +20,7 @@ spring:
 
 server:
   shutdown: graceful
+  forward-headers-strategy: framework
   error:
     include-message: never
 
@@ -43,12 +44,17 @@ macrosaurus:
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   security:
-    issuer-uri: ${AUTH0_ISSUER_URI:}
-    audience: ${AUTH0_AUDIENCE:https://api.macrosaurus.app}
+    supabase-url: ${SUPABASE_URL:}
+    audience: authenticated
+    dev-mode: ${DEV_AUTH_ENABLED:true}
   open-food-facts:
     base-url: ${OFF_BASE_URL:https://world.openfoodfacts.org}
     user-agent: ${OFF_USER_AGENT:Macrosaurus/0.1 (contact@example.com)}
+    connect-timeout: ${OFF_CONNECT_TIMEOUT:5s}
+    read-timeout: ${OFF_READ_TIMEOUT:15s}
   open-router:
     base-url: ${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}
     api-key: ${OPENROUTER_API_KEY:}
     model: ${OPENROUTER_MODEL:google/gemini-2.5-flash}
+    connect-timeout: ${OPENROUTER_CONNECT_TIMEOUT:5s}
+    read-timeout: ${OPENROUTER_READ_TIMEOUT:90s}

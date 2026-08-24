@@ -2,11 +2,10 @@
 /// <reference types="vite-plugin-pwa/client" />
 
 interface ImportMetaEnv {
-    readonly VITE_AUTH_MODE?: 'auth0' | 'dev'
+    readonly VITE_AUTH_MODE?: 'supabase' | 'dev'
     readonly VITE_DEV_USER_ID?: string
-    readonly VITE_AUTH0_DOMAIN?: string
-    readonly VITE_AUTH0_CLIENT_ID?: string
-    readonly VITE_AUTH0_AUDIENCE?: string
+    readonly VITE_SUPABASE_URL?: string
+    readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string
 }
 
 interface ImportMeta {

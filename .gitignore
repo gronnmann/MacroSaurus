@@ -1,9 +1,8 @@
-.gradle/
 .kotlin/
 .pnpm-store/
 .idea/
 .vscode/
-**/build/
+**/target/
 **/out/
 **/node_modules/
 **/dist/
@@ -11,6 +10,7 @@
 **/playwright-report/
 **/storybook-static/
 .env
+.env.production
 .DS_Store
 *.iml
 *.log

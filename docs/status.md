@@ -7,15 +7,19 @@ This document separates implemented behavior from architecture planned for later
 ### Platform
 
 - Java 26 / Kotlin 2.4 / Spring Boot 4.1 build.
-- Gradle wrapper with automatic toolchain provisioning.
+- Maven 3.9 build with an enforced JDK 26 runtime.
 - Spring Modulith boundary verification.
 - PostgreSQL schema managed by Flyway.
 - RFC 9457-style API errors and generated OpenAPI/Swagger UI.
-- Auth0-compatible JWT validation when configured.
-- React/Vite PWA built with pnpm, responsive feature routes, Auth0 SPA login, and
+- Supabase JWT validation through the project's asymmetric JWKS.
+- React/Vite PWA built with pnpm, responsive feature routes, email OTP login, and
   a documented development identity adapter.
 - Storybook component catalogue, Vitest component tests, and mocked Playwright
   desktop/mobile journeys.
+- PostgreSQL Testcontainers integration coverage for migrations and core
+  persistence workflows.
+- Multi-platform backend/web images published to GitHub Container Registry and
+  a health-aware Docker Compose deployment script.
 
 ### Nutrition and tracking
 
@@ -71,8 +75,7 @@ This document separates implemented behavior from architecture planned for later
 - Automatic image/draft cleanup.
 - Native mobile applications.
 - Production-ready reference-intake recommendations.
-- Database-backed integration test suite.
-- Production deployment manifests, rate limiting, and full observability pipeline.
+- Rate limiting and a full observability pipeline.
 
 ## Product assumptions
 

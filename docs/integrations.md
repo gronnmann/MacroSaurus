@@ -94,21 +94,39 @@ Current limitations:
 - MinIO is provisioned locally but is not connected.
 - Provider privacy and data-retention terms still need production review.
 
-## Auth0/OIDC
+## Supabase Auth and PostgreSQL
 
-The backend is an OAuth resource server, not an authorization server.
+The browser uses Supabase only for Auth. It requests a six-digit email OTP,
+verifies it through `@supabase/supabase-js`, persists and refreshes the resulting
+session, and sends the access token to the Macrosaurus API. It never calls
+Supabase REST, GraphQL, Realtime, Storage, or database methods.
 
-To configure an Auth0 API:
+Configure the Supabase project as follows:
 
-1. Create an Auth0 API whose identifier matches `AUTH0_AUDIENCE`.
-2. Use an EU-region tenant for the chosen deployment/privacy model.
-3. Set `AUTH0_ISSUER_URI` to the tenant issuer, including the trailing slash.
-4. Configure the browser application and allowed callback/logout/origin URLs.
-5. Send the returned API access token as a bearer token.
+1. Enable email sign-in and open user registration; disable anonymous sign-in.
+2. Change the Magic Link email template to display `{{ .Token }}` without a
+   confirmation link.
+3. Set the email OTP length to six digits, expiry to ten minutes, and resend
+   cooldown to 60 seconds.
+4. Configure custom SMTP before public use and review the project's Auth rate
+   limits. This release deliberately relies on those limits rather than CAPTCHA.
+5. Configure an asymmetric RS256 Auth signing key. The backend validates tokens
+   locally against `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`.
+6. Disable the Data API integration. Application tables remain in `public`, but
+   no generated REST or GraphQL endpoint should expose them.
 
-The backend validates issuer and audience and uses `sub` as `user_id`. The web
-app implements the SPA redirect and bearer-token flow; its audience must match
-the backend configuration.
+The backend requires issuer, expiry, `authenticated` audience and role,
+`is_anonymous=false`, and a UUID `sub`. That subject is stored as the existing
+string `user_id`; there is no foreign key or runtime lookup into `auth.users`.
+This cutover starts with a fresh database and user directory; no Auth identities
+or application rows are imported or remapped.
+
+Flyway remains the only application-schema manager. Provision a dedicated
+`macrosaurus_app` PostgreSQL login with `USAGE` and `CREATE` on `public`, then
+use it for both startup migrations and the application connection. Do not use a
+Supabase service-role API key. For the persistent Spring container, prefer the
+TLS direct database endpoint; use the port-5432 session pooler only when the
+deployment network cannot reach the direct IPv6 endpoint.
 
 ## MinIO/S3-compatible storage
 

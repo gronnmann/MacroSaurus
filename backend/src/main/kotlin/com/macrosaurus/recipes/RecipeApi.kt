@@ -126,19 +126,26 @@ class RecipeService(
                       from recipe_ingredients where recipe_revision_id = ? order by id
                     """.trimIndent(),
                     revisionId,
-                ).map {
-                    val foodRevisionId = it.get("food_revision_id", UUID::class.java)!!
-                    RecipeIngredientView(
-                        it.get("id", UUID::class.java)!!,
-                        foodRevisionId,
-                        catalog.byRevision(userId, foodRevisionId).name,
-                        it.get("quantity", BigDecimal::class.java)!!,
-                        it.get("unit", String::class.java)!!,
-                        it.get("portion_id", UUID::class.java),
-                        it.get("resolved_grams", BigDecimal::class.java),
-                        json.nutrients(it.get("nutrients", String::class.java)!!).values,
-                    )
-                }
+                )
+        val foods =
+            catalog.byRevisions(
+                userId,
+                ingredients.map { it.get("food_revision_id", UUID::class.java)!! },
+            )
+        val ingredientViews =
+            ingredients.map {
+                val foodRevisionId = it.get("food_revision_id", UUID::class.java)!!
+                RecipeIngredientView(
+                    it.get("id", UUID::class.java)!!,
+                    foodRevisionId,
+                    foods.getValue(foodRevisionId).name,
+                    it.get("quantity", BigDecimal::class.java)!!,
+                    it.get("unit", String::class.java)!!,
+                    it.get("portion_id", UUID::class.java),
+                    it.get("resolved_grams", BigDecimal::class.java),
+                    json.nutrients(it.get("nutrients", String::class.java)!!).values,
+                )
+            }
         return RecipeView(
             record.get("id", UUID::class.java)!!,
             revisionId,
@@ -150,7 +157,7 @@ class RecipeService(
             total.values,
             total.scaled(BigDecimal.ONE.divide(servings, 12, RoundingMode.HALF_UP)).values,
             yield?.let { total.scaled(BigDecimal("100").divide(it, 12, RoundingMode.HALF_UP)).values },
-            ingredients,
+            ingredientViews,
             record.get("created_at", OffsetDateTime::class.java)!!,
         )
     }
@@ -171,7 +178,13 @@ class RecipeService(
         recipeId: UUID,
         request: SaveRecipeRequest,
     ): RecipeView {
-        val current = get(userId, recipeId)
+        val owned =
+            db.fetchOne(
+                "select id from recipes where id = ? and owner_user_id = ? for update",
+                recipeId,
+                userId,
+            ) ?: throw NotFoundException("Recipe was not found")
+        val current = get(userId, owned.get("id", UUID::class.java)!!)
         return insertRevision(userId, recipeId, current.revision + 1, request)
     }
 

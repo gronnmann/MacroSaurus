@@ -440,6 +440,7 @@ function GoalForm({ settings }: { settings: GoalSettings }) {
 
 function Preferences({ profile }: { profile: Awaited<ReturnType<typeof api.profile>> }) {
     const auth = useAppAuth()
+    const toast = useToast()
     return (
         <Card id="preferences">
             <SectionHeader eyebrow="PREFERENCES" title="App settings" aside={<Settings />} />
@@ -457,7 +458,16 @@ function Preferences({ profile }: { profile: Awaited<ReturnType<typeof api.profi
                     <b>{profile.timezone}</b>
                 </div>
             </div>
-            <Button variant="ghost" onClick={() => auth.logout()}>
+            <Button
+                variant="ghost"
+                onClick={() =>
+                    void auth
+                        .logout()
+                        .catch((error: Error) =>
+                            toast.push('Could not log out', error.message, 'error'),
+                        )
+                }
+            >
                 <LogOut />
                 Log out
             </Button>

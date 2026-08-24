@@ -1,18 +1,28 @@
-import { Auth0Provider, useAuth0 } from '@auth0/auth0-react'
-import { createContext, type PropsWithChildren, useCallback, useContext } from 'react'
+import { createClient, type Session } from '@supabase/supabase-js'
+import {
+    createContext,
+    type PropsWithChildren,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+} from 'react'
 
-type AuthMode = 'auth0' | 'dev'
+type AuthMode = 'supabase' | 'dev'
 type AuthState = {
     mode: AuthMode
     isLoading: boolean
     isAuthenticated: boolean
+    initializationError?: string
     user?: { name?: string; email?: string; picture?: string }
     getToken: () => Promise<string | undefined>
-    login: () => Promise<void>
+    sendOtp: (email: string) => Promise<void>
+    verifyOtp: (email: string, code: string) => Promise<void>
     logout: () => Promise<void>
 }
 
-const mode: AuthMode = import.meta.env.VITE_AUTH_MODE === 'auth0' ? 'auth0' : 'dev'
+const mode: AuthMode = import.meta.env.VITE_AUTH_MODE === 'supabase' ? 'supabase' : 'dev'
 const AuthContext = createContext<AuthState | null>(null)
 
 function DevAuthProvider({ children }: PropsWithChildren) {
@@ -22,29 +32,84 @@ function DevAuthProvider({ children }: PropsWithChildren) {
         isAuthenticated: true,
         user: { name: import.meta.env.VITE_DEV_USER_ID || 'dev-user' },
         getToken: async () => undefined,
-        login: async () => undefined,
+        sendOtp: async () => undefined,
+        verifyOtp: async () => undefined,
         logout: async () => undefined,
     }
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
-function Auth0Bridge({ children }: PropsWithChildren) {
-    const auth = useAuth0()
-    const login = useCallback(async () => {
-        await auth.loginWithRedirect({
-            appState: { returnTo: `${location.pathname}${location.search}` },
+function SupabaseAuthProvider({
+    children,
+    url,
+    publishableKey,
+}: PropsWithChildren<{ url: string; publishableKey: string }>) {
+    const client = useMemo(() => createClient(url, publishableKey), [url, publishableKey])
+    const [session, setSession] = useState<Session | null>(null)
+    const [isLoading, setIsLoading] = useState(true)
+    const [initializationError, setInitializationError] = useState<string>()
+
+    useEffect(() => {
+        let active = true
+        const {
+            data: { subscription },
+        } = client.auth.onAuthStateChange((_event, nextSession) => {
+            if (!active) return
+            setSession(nextSession)
+            setIsLoading(false)
+            setInitializationError(undefined)
         })
-    }, [auth])
+        void client.auth.getSession().then(({ data, error }) => {
+            if (!active) return
+            if (error) setInitializationError(error.message)
+            setSession(data.session)
+            setIsLoading(false)
+        })
+        return () => {
+            active = false
+            subscription.unsubscribe()
+        }
+    }, [client])
+
+    const getToken = useCallback(async () => session?.access_token, [session])
+    const sendOtp = useCallback(
+        async (email: string) => {
+            const { error } = await client.auth.signInWithOtp({
+                email,
+                options: { shouldCreateUser: true },
+            })
+            if (error) throw error
+        },
+        [client],
+    )
+    const verifyOtp = useCallback(
+        async (email: string, code: string) => {
+            const { error } = await client.auth.verifyOtp({ email, token: code, type: 'email' })
+            if (error) throw error
+        },
+        [client],
+    )
     const logout = useCallback(async () => {
-        await auth.logout({ logoutParams: { returnTo: location.origin } })
-    }, [auth])
+        const { error } = await client.auth.signOut({ scope: 'local' })
+        if (error) throw error
+        location.replace('/login')
+    }, [client])
+    const metadata = session?.user.user_metadata
     const value: AuthState = {
-        mode: 'auth0',
-        isLoading: auth.isLoading,
-        isAuthenticated: auth.isAuthenticated,
-        user: auth.user,
-        getToken: auth.getAccessTokenSilently,
-        login,
+        mode: 'supabase',
+        isLoading,
+        isAuthenticated: Boolean(session),
+        initializationError,
+        user: session
+            ? {
+                  name: metadata?.full_name || metadata?.name || session.user.email,
+                  email: session.user.email,
+                  picture: metadata?.avatar_url || metadata?.picture,
+              }
+            : undefined,
+        getToken,
+        sendOtp,
+        verifyOtp,
         logout,
     }
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
@@ -52,31 +117,22 @@ function Auth0Bridge({ children }: PropsWithChildren) {
 
 export function AppAuthProvider({ children }: PropsWithChildren) {
     if (mode === 'dev') return <DevAuthProvider>{children}</DevAuthProvider>
-    const domain = import.meta.env.VITE_AUTH0_DOMAIN
-    const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID
-    const audience = import.meta.env.VITE_AUTH0_AUDIENCE
-    if (!domain || !clientId || !audience) {
+    const url = import.meta.env.VITE_SUPABASE_URL
+    const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+    if (!url || !publishableKey) {
         return (
             <div className="fatal-config">
                 <h1>Authentication is not configured</h1>
                 <p>
-                    Set the Auth0 Vite variables or use <code>VITE_AUTH_MODE=dev</code>.
+                    Set the Supabase Vite variables or use <code>VITE_AUTH_MODE=dev</code>.
                 </p>
             </div>
         )
     }
     return (
-        <Auth0Provider
-            domain={domain}
-            clientId={clientId}
-            authorizationParams={{ redirect_uri: location.origin, audience }}
-            onRedirectCallback={(state) => {
-                history.replaceState({}, '', state?.returnTo || '/today')
-                dispatchEvent(new PopStateEvent('popstate'))
-            }}
-        >
-            <Auth0Bridge>{children}</Auth0Bridge>
-        </Auth0Provider>
+        <SupabaseAuthProvider url={url} publishableKey={publishableKey}>
+            {children}
+        </SupabaseAuthProvider>
     )
 }
 

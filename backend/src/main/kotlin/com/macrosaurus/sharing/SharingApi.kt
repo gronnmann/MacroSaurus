@@ -3,7 +3,6 @@ package com.macrosaurus.sharing
 import com.macrosaurus.catalog.CatalogService
 import com.macrosaurus.identity.UserContext
 import com.macrosaurus.recipes.RecipeService
-import com.macrosaurus.shared.ForbiddenException
 import com.macrosaurus.shared.JsonCodec
 import com.macrosaurus.shared.NotFoundException
 import jakarta.validation.Valid
@@ -20,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.security.MessageDigest
+import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.Base64
 import java.util.UUID
@@ -53,6 +53,7 @@ class SharingService(
     private val mapper: ObjectMapper,
     private val catalog: CatalogService,
     private val recipes: RecipeService,
+    private val clock: Clock,
 ) {
     @Transactional
     fun create(
@@ -67,7 +68,7 @@ class SharingService(
         val tokenBytes = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
         val rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)
         val id = UUID.randomUUID()
-        val createdAt = OffsetDateTime.now()
+        val createdAt = OffsetDateTime.now(clock)
         db.execute(
             """
             insert into share_links(id, owner_user_id, token_hash, resource_type, resource_revision_id,

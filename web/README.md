@@ -3,7 +3,7 @@
 The web workspace is the installable, mobile-first Macrosaurus client. It covers
 the diary, complete nutrient display, food and portion management, recipes,
 barcode and label scanning, weigh-ins, expenditure estimates, goals, profile
-settings, Auth0, and public share snapshots.
+settings, Supabase email OTP authentication, and public share snapshots.
 
 ## Start locally
 
@@ -26,8 +26,8 @@ VITE_AUTH_MODE=dev
 VITE_DEV_USER_ID=dev-user
 ```
 
-Do not use this mode on a public deployment. Production uses `auth0` plus the
-domain, SPA client ID, and API audience documented in
+Do not use this mode on a public deployment. Production uses `supabase` plus the
+project URL and publishable key documented in
 [`../docs/frontend-architecture.md`](../docs/frontend-architecture.md).
 
 ## Commands

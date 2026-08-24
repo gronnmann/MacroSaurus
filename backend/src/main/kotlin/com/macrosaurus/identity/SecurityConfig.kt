@@ -1,6 +1,6 @@
 package com.macrosaurus.identity
 
-import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.security.config.Customizer.withDefaults
@@ -9,19 +9,19 @@ import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator
 import org.springframework.security.oauth2.core.OAuth2TokenValidator
 import org.springframework.security.oauth2.jwt.Jwt
-import org.springframework.security.oauth2.jwt.JwtDecoders
 import org.springframework.security.oauth2.jwt.JwtValidators
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
+import java.net.URI
+import java.util.UUID
 
 @Configuration
 class SecurityConfig(
-    @Value("\${macrosaurus.security.issuer-uri:}") private val issuerUri: String,
-    @Value("\${macrosaurus.security.audience}") private val audience: String,
-    @Value("\${macrosaurus.web.allowed-origins}") private val allowedOrigins: List<String>,
+    private val security: SecurityProperties,
+    private val web: WebProperties,
 ) {
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
@@ -38,30 +38,22 @@ class SecurityConfig(
                         "/api-docs/**",
                         "/api/v1/shared/**",
                     ).permitAll()
-                if (issuerUri.isBlank()) it.anyRequest().permitAll() else it.anyRequest().authenticated()
+                if (security.devMode) it.anyRequest().permitAll() else it.anyRequest().authenticated()
             }
-        if (issuerUri.isNotBlank()) {
+        if (!security.devMode) {
             http.oauth2ResourceServer { resource -> resource.jwt { jwt -> jwt.decoder(buildJwtDecoder()) } }
         }
         return http.build()
     }
 
     private fun buildJwtDecoder(): NimbusJwtDecoder {
-        val decoder = JwtDecoders.fromIssuerLocation<NimbusJwtDecoder>(issuerUri)
-        val issuer = JwtValidators.createDefaultWithIssuer(issuerUri)
-        val audienceValidator =
-            OAuth2TokenValidator<Jwt> { jwt ->
-                if (jwt.audience?.contains(audience) == true) {
-                    org.springframework.security.oauth2.core.OAuth2TokenValidatorResult
-                        .success()
-                } else {
-                    org.springframework.security.oauth2.core.OAuth2TokenValidatorResult.failure(
-                        org.springframework.security.oauth2.core
-                            .OAuth2Error("invalid_token", "Required audience is missing", null),
-                    )
-                }
-            }
-        decoder.setJwtValidator(DelegatingOAuth2TokenValidator(issuer, audienceValidator))
+        val supabaseUrl = security.supabaseUrl.trimEnd('/')
+        require(supabaseUrl.isNotBlank()) { "SUPABASE_URL is required when development authentication is disabled" }
+        val uri = URI.create(supabaseUrl)
+        require(uri.scheme == "https" && !uri.host.isNullOrBlank()) { "SUPABASE_URL must be an absolute HTTPS URL" }
+        val issuerUri = "$supabaseUrl/auth/v1"
+        val decoder = NimbusJwtDecoder.withJwkSetUri("$issuerUri/.well-known/jwks.json").build()
+        decoder.setJwtValidator(supabaseJwtValidator(issuerUri, security.audience))
         return decoder
     }
 
@@ -71,7 +63,7 @@ class SecurityConfig(
             source.registerCorsConfiguration(
                 "/**",
                 CorsConfiguration().apply {
-                    allowedOrigins = this@SecurityConfig.allowedOrigins
+                    allowedOrigins = web.allowedOrigins
                     allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                     allowedHeaders = listOf("Authorization", "Content-Type", "Idempotency-Key", "X-User-Id")
                     exposedHeaders = listOf("ETag", "Location")
@@ -79,3 +71,54 @@ class SecurityConfig(
             )
         }
 }
+
+@ConfigurationProperties("macrosaurus.security")
+data class SecurityProperties(
+    val supabaseUrl: String = "",
+    val audience: String = "authenticated",
+    val devMode: Boolean = true,
+)
+
+@ConfigurationProperties("macrosaurus.web")
+data class WebProperties(
+    val allowedOrigins: List<String>,
+)
+
+internal fun supabaseJwtValidator(
+    issuerUri: String,
+    audience: String,
+): OAuth2TokenValidator<Jwt> =
+    DelegatingOAuth2TokenValidator(
+        JwtValidators.createDefaultWithIssuer(issuerUri),
+        OAuth2TokenValidator { jwt ->
+            val validSubject = runCatching { UUID.fromString(jwt.subject) }.isSuccess
+            when {
+                jwt.audience?.contains(audience) != true -> {
+                    invalidToken("Required audience is missing")
+                }
+
+                jwt.claims["role"] != "authenticated" -> {
+                    invalidToken("Required role is missing")
+                }
+
+                jwt.claims["is_anonymous"] != false -> {
+                    invalidToken("Anonymous sessions are not accepted")
+                }
+
+                !validSubject -> {
+                    invalidToken("Subject must be a UUID")
+                }
+
+                else -> {
+                    org.springframework.security.oauth2.core.OAuth2TokenValidatorResult
+                        .success()
+                }
+            }
+        },
+    )
+
+private fun invalidToken(description: String) =
+    org.springframework.security.oauth2.core.OAuth2TokenValidatorResult.failure(
+        org.springframework.security.oauth2.core
+            .OAuth2Error("invalid_token", description, null),
+    )

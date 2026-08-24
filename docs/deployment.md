@@ -1,102 +1,215 @@
-# Deployment and operations
+# Deploy Macrosaurus with Docker and Nginx
 
-## Build artifacts
+This tutorial deploys the web application and Spring Boot API with Docker
+Compose, uses managed PostgreSQL for durable data, and terminates HTTPS at Nginx
+on an Ubuntu host. The application containers expose only a loopback port; the
+database and backend are never published directly.
 
-```powershell
-.\gradlew.bat :backend:bootJar --no-configuration-cache
-pnpm --dir web build
+## 1. Prepare the external services
+
+Before provisioning the server, create:
+
+- A DNS record such as `macrosaurus.example.com` pointing to the server.
+- A Supabase project in the chosen region. Configure email OTP Auth, custom SMTP,
+  an asymmetric RS256 signing key, and a dedicated `macrosaurus_app` PostgreSQL
+  login as described in [Integrations](integrations.md).
+- Disable the project's Data API integration. Macrosaurus uses the `public`
+  schema through JDBC, but never uses generated REST or GraphQL endpoints.
+- Optional OpenRouter credentials if nutrition-label extraction is enabled.
+
+Use the direct Supabase database endpoint for this persistent backend when the
+host supports IPv6. On IPv4-only hosts use the Supavisor session endpoint on port
+5432. Convert the selected connection string to JDBC syntax and require TLS, for
+example `jdbc:postgresql://host:5432/postgres?sslmode=require`.
+
+## 2. Prepare an Ubuntu host
+
+Use a supported Ubuntu release with ports 22, 80, and 443 allowed by its
+firewall. Install Docker Engine and its Compose plugin using Docker's official
+repository, then install the host reverse proxy and Certbot:
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+docker version
+docker compose version
 ```
 
-Outputs:
+Create a non-root deployment account, grant only the access it needs, and clone
+the repository under that account. Membership in the `docker` group is
+root-equivalent and should be treated accordingly.
 
-- Executable backend jar: `backend/build/libs/backend-0.1.0-SNAPSHOT.jar`
-- Static web application: `web/dist/`
+## 3. Configure production
 
-The backend requires Java 26 because Kotlin and Java bytecode target 26.
+From the repository root:
 
-## Recommended topology
-
-```mermaid
-flowchart LR
-    Browser --> CDN[CDN / static web host]
-    Browser --> Proxy[HTTPS reverse proxy]
-    Proxy --> App[Macrosaurus Spring Boot]
-    App --> PG[(Managed PostgreSQL)]
-    App --> Auth0[Auth0 JWKS / metadata]
-    App --> OFF[Open Food Facts]
-    App --> OR[OpenRouter]
+```bash
+cp .env.production.example .env.production
+chmod 600 .env.production
 ```
 
-The frontend and backend can share one public origin through routing (`/api` to
-Spring and everything else to static assets), reducing CORS complexity.
+Edit every placeholder in `.env.production`. In particular:
 
-## Runtime command
+- Keep `IMAGE_REPOSITORY=ghcr.io/gronnmann/macrosaurus` for this repository, or
+  change it when publishing a fork under another GitHub account.
+- Set `APP_VERSION` to `main` for a test deployment or, preferably, an immutable
+  release (`v0.2.0`) or commit (`sha-a1b2c3d`) tag.
+- Set `APP_ORIGIN` to the exact public HTTPS origin, without a trailing path.
+- Use the selected Supabase JDBC endpoint with `sslmode=require` and the
+  dedicated database login.
+- Set the real Supabase project URL and publishable key. Never configure a secret
+  or service-role API key in the app.
+- Replace the Open Food Facts contact placeholder.
+- Leave `OPENROUTER_API_KEY` blank only when label extraction is intentionally
+  disabled.
 
-```powershell
-java -jar backend-0.1.0-SNAPSHOT.jar
+The production Spring profile disables development identity and refuses to
+start without an absolute HTTPS Supabase project URL. Never commit
+`.env.production`.
+
+## 4. Publish images with GitHub Actions
+
+The `Quality and containers` workflow verifies the repository and publishes the
+backend and web images to GitHub Container Registry. Configure these public
+build-time values under **Repository settings → Secrets and variables → Actions
+→ Variables** before running it:
+
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+
+No registry password is needed in Actions: the workflow uses its scoped
+`GITHUB_TOKEN`. A push to `main` publishes `main` and `sha-*` tags. A `v*` Git
+tag also publishes the original release tag, semantic version tags, and
+`latest`. The workflow can also be started manually from the Actions tab.
+
+The resulting image names are:
+
+```text
+ghcr.io/gronnmann/macrosaurus-backend:<tag>
+ghcr.io/gronnmann/macrosaurus-web:<tag>
 ```
 
-Inject configuration through the platform's secret/configuration facilities. Do
-not ship a populated `.env` inside an image.
+Make the packages public in their GitHub package settings for anonymous pulls.
+For private packages, authenticate the deployment host using a token with only
+`read:packages` access:
 
-## Required production settings
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io --username YOUR_GITHUB_USER --password-stdin
+```
 
-- Strong `DATABASE_USERNAME` and `DATABASE_PASSWORD` with least privilege.
-- TLS-enabled database connection as required by the provider.
-- Nonblank `AUTH0_ISSUER_URI` and correct `AUTH0_AUDIENCE`.
-- Real `OFF_USER_AGENT` contact details.
-- `OPENROUTER_API_KEY` only if label extraction is enabled.
-- A reviewed image-capable `OPENROUTER_MODEL`.
-- Production CORS origin configuration; it is currently hard-coded for localhost
-  and must be made configurable before launch.
+## 5. Pull and start the application
 
-## Database migrations
+The deployment script validates the environment, pulls both images, recreates
+the services without building on the server, waits for the backend health check,
+and prints recent logs if deployment fails:
 
-Flyway runs during application startup. Therefore:
+```bash
+./scripts/deploy.sh v0.2.0
+```
 
-- The application database user needs migration privileges today.
-- Deploy only one migration-capable instance first when a migration is not safely
-  concurrent.
-- Back up before destructive or long-running migrations.
-- Never deploy application code that expects a migration which failed.
+Omit the argument to use `APP_VERSION` from `.env.production`. Use `main` for a
+quick test of the most recently published main-branch build:
 
-A later setup may use a separate migration job/user and a lower-privilege runtime
-user.
+```bash
+./scripts/deploy.sh main
+```
 
-## Health and shutdown
+The backend image is built in Actions with Maven and JDK 26, then runs as a
+non-root user on a JRE-only image. The web image is built with Node 24 and served
+by Nginx. The Supabase URL and publishable key are public build-time values;
+database and provider secrets are supplied only to the backend at runtime.
 
-- Liveness/readiness source: `/actuator/health` and its probe subpaths when the
-  hosting platform uses them.
-- Spring graceful shutdown is enabled, allowing in-flight requests to finish.
-- Ensure the platform termination grace period is longer than Spring's shutdown
-  timeout.
+Flyway applies database migrations while the backend starts. Keep the backend
+at one replica during migrations and do not route traffic until its readiness
+check passes:
 
-Do not expose all actuator endpoints directly to the internet. Place metrics
-behind network policy/authentication and avoid adding user data to metric labels.
+```bash
+docker compose --env-file .env.production -f compose.production.yml logs -f backend
+curl --fail http://127.0.0.1:8080/
+```
 
-## Data protection
+## 6. Put HTTPS in front of the containers
 
-- Encrypt transport and storage.
-- Treat profile, diary, and weight data as sensitive personal data.
-- Back up PostgreSQL and test restoration.
-- Define retention for scan drafts, audit data, backups, and deleted accounts.
-- Keep external provider keys in a secret manager and rotate them.
-- Avoid logging request bodies, tokens, label images, or nutrition/weight history.
+Create `/etc/nginx/sites-available/macrosaurus` on the host, replacing the
+example domain if necessary:
 
-Account export/deletion workflows and scheduled scan cleanup are not implemented;
-they are launch blockers for the intended EU-first product.
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name macrosaurus.example.com;
 
-## Production readiness checklist
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
 
-- [ ] Configure and test Auth0 SPA callback/logout origins and the matching API audience.
-- [ ] Make CORS configurable and restrict it to deployed origins.
-- [ ] Add database-backed integration tests and run migrations on PostgreSQL 17.
-- [ ] Implement full USDA importer and version metadata.
-- [ ] Complete Open Food Facts licensing/attribution review.
-- [ ] Add OpenRouter timeouts, retry/backoff, cost controls, and cleanup.
-- [ ] Implement account export/deletion and retention jobs.
-- [ ] Add rate limiting for public and provider-facing endpoints.
-- [ ] Add structured logging, traces, dashboards, and alerts without sensitive data.
-- [ ] Configure backups and perform a restore exercise.
-- [ ] Perform dependency, authorization, and penetration testing.
-- [ ] Add terms, privacy policy, wellness disclaimers, and incident procedures.
+Enable it, validate Nginx, obtain a certificate, and verify automatic renewal:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/macrosaurus /etc/nginx/sites-enabled/macrosaurus
+sudo nginx -t
+sudo systemctl reload nginx
+sudo certbot --nginx -d macrosaurus.example.com
+sudo certbot renew --dry-run
+```
+
+When a cloud load balancer terminates TLS instead, point it at the same
+loopback-bound service through an appropriate private network and preserve the
+forwarded host, client address, and scheme headers.
+
+## 7. Verify the deployment
+
+Verify the browser flow and the authenticated API:
+
+```bash
+curl --fail https://macrosaurus.example.com/
+curl --include https://macrosaurus.example.com/api/v1/shared/not-a-real-token
+docker compose --env-file .env.production -f compose.production.yml logs --tail=200 backend web
+```
+
+The fake share token should return a structured `404` problem, which confirms
+that HTTPS, Nginx, and the API path are connected. Also verify email OTP login,
+profile isolation between two accounts, a food entry, logout, and that a request
+to the Supabase Data API cannot read an application table. The backend health
+endpoint is intentionally used by the private container health check rather
+than exposed through the public web proxy.
+
+## Updates and rollback
+
+Back up the database through the managed provider before releases containing
+migrations. Publish a Git tag, wait for the workflow to complete, then deploy
+that exact tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+./scripts/deploy.sh v0.2.0
+```
+
+Keep the previous Git tag and images until verification completes. To roll the
+containers back, run the script with the previous tag. Flyway migrations are
+forward-only: never assume an older application can run against a newly migrated
+schema. Use a tested forward fix or restore the managed database to a separate
+instance when a migration itself must be rolled back.
+
+## Operations checklist
+
+- Monitor container restarts, readiness, HTTP error rate, latency, and managed
+  PostgreSQL storage/connections.
+- Test database restore procedures regularly; a configured backup is not enough.
+- Rotate database and provider credentials and exercise the Supabase signing-key
+  rotation procedure without deploying private signing material.
+- Do not log tokens, request bodies, label images, diary data, or weight history.
+- Keep Docker, Nginx, base images, Maven dependencies, and pnpm dependencies
+  patched.
+- Review Open Food Facts attribution/licensing and OpenRouter cost limits before
+  enabling those integrations publicly.
+- Complete account export/deletion, retention jobs, rate limiting, and security
+  review before treating the pre-release application as production-ready.

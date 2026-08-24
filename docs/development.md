@@ -7,7 +7,7 @@ From the repository root:
 ```powershell
 pnpm install --frozen-lockfile
 docker compose up -d postgres
-.\gradlew.bat :backend:bootRun
+mvn -pl backend spring-boot:run
 ```
 
 In another terminal:
@@ -16,10 +16,8 @@ In another terminal:
 pnpm --dir web dev
 ```
 
-The Gradle wrapper runs on Java 17+ and provisions the Java 26 compile/runtime
-toolchain through the configured Foojay resolver. To use an already-installed
-JDK 26, make it discoverable to Gradle in the normal way; no repository change is
-needed.
+The backend requires JDK 26 and Maven 3.9 or newer. This repository intentionally
+uses system Maven rather than committing a Maven wrapper.
 
 ## Daily commands
 
@@ -27,10 +25,11 @@ needed.
 |---|---|
 | Start database | `docker compose up -d postgres` |
 | Follow database logs | `docker compose logs -f postgres` |
-| Run backend | `.\gradlew.bat :backend:bootRun` |
+| Run backend | `mvn -pl backend spring-boot:run` |
 | Run web dev server | `pnpm --dir web dev` |
-| Backend tests | `.\gradlew.bat :backend:test --no-configuration-cache` |
-| Backend executable | `.\gradlew.bat :backend:bootJar` |
+| Fast backend tests | `mvn -pl backend test` |
+| All backend checks | `mvn -pl backend verify` |
+| Backend executable | `mvn -pl backend package` |
 | Format all source | `pnpm format` |
 | All commit checks | `pnpm quality` |
 | Frontend type check | `pnpm --dir web check` |
@@ -40,11 +39,11 @@ needed.
 | Component catalogue | `pnpm --dir web storybook` |
 | Stop infrastructure | `docker compose down` |
 
-Use `./gradlew` instead of `.\gradlew.bat` on macOS/Linux.
-
 `pnpm install` configures the tracked Husky pre-commit hook. It runs
 `pnpm quality`, which combines Biome, TypeScript, Spotless/ktlint, backend tests,
-and Spring Modulith boundary verification. CI runs the same command.
+Spring Modulith boundary verification, and PostgreSQL integration tests. Docker
+must be running for the Testcontainers-backed integration suite. CI runs the
+same command.
 
 To run the browser suite against a real local backend rather than its normal API
 fixtures, start PostgreSQL and the Spring backend, then run:
@@ -162,7 +161,7 @@ docker compose logs postgres
 ```
 
 Also check `DATABASE_URL`, `DATABASE_USERNAME`, and `DATABASE_PASSWORD` in the
-shell that starts Gradle.
+shell that starts Maven.
 
 ### PostgreSQL reports that an application table does not exist
 
@@ -196,17 +195,17 @@ for Spring Boot 4. If this error appears after changing dependencies, confirm th
 both `spring-modulith-events-jdbc` and `spring-modulith-events-jackson` remain on
 the runtime classpath and use the same Spring Modulith BOM version.
 
-### Java 26 toolchain cannot be provisioned
+### Maven or Java version is rejected
 
-Confirm network access to Gradle/plugin repositories and that the launcher is at
-least Java 17:
+Confirm that system Maven 3.9+ is using JDK 26:
 
 ```powershell
 java -version
-.\gradlew.bat -version
+mvn -version
 ```
 
-Alternatively install JDK 26 locally and rerun the wrapper.
+Install or select JDK 26 before running Maven; the build intentionally does not
+download a JDK automatically.
 
 ### Vite cannot resolve dependencies
 
@@ -225,8 +224,8 @@ build-script warnings; `pnpm-workspace.yaml` explicitly permits esbuild.
 Set `OPENROUTER_API_KEY` in the backend process. The selected model must support
 both image input and strict JSON Schema output.
 
-### Auth0 mode makes the web app return 401
+### Supabase mode makes the web app return 401
 
-Confirm the web and backend use the same audience, the frontend origin is in the
-Auth0 SPA allowlists, and both processes were restarted after changing variables.
-Use `VITE_AUTH_MODE=dev` only while the backend issuer is blank.
+Confirm the web and backend use the same `SUPABASE_URL`, the project uses an
+asymmetric signing key, and both processes were restarted after changing
+variables. Use `VITE_AUTH_MODE=dev` only while `DEV_AUTH_ENABLED=true`.

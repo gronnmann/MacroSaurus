@@ -17,7 +17,7 @@ flowchart LR
     Modules --> DB[(PostgreSQL)]
     Modules --> OFF[Open Food Facts]
     Modules --> OR[OpenRouter]
-    Auth[Auth0 / OIDC] --> API
+    Auth[Supabase Auth] --> API
 ```
 
 ## Feature modules
@@ -128,9 +128,10 @@ See [Data model](data-model.md) for table ownership and invariants.
 
 ## Authentication and authorization
 
-With `AUTH0_ISSUER_URI` configured, Spring Security validates JWT signature,
-issuer, and the configured audience. `UserContext` uses the JWT subject as the
-Macrosaurus user identifier.
+With `SUPABASE_URL` configured, Spring Security validates the Supabase JWT
+signature through the project's JWKS, plus issuer, `authenticated` audience and
+role, non-anonymous status, and UUID subject. `UserContext` uses that subject as
+the Macrosaurus user identifier.
 
 With no issuer configured, the backend permits requests and uses `X-User-Id` or
 `dev-user`. This makes local development easy but is unsafe for a public network.
@@ -144,7 +145,7 @@ revocable.
 The React PWA is organized by route-level features over a reusable component and
 design-system layer. React Router owns public/protected navigation, TanStack
 Query owns server state, React Aria supplies accessible interaction primitives,
-and `web/src/lib/api.ts` centralizes the hand-written API contract and Auth0/dev
+and `web/src/lib/api.ts` centralizes the hand-written API contract and Supabase/dev
 headers. `App.tsx` is intentionally only a router entry point.
 
 The generated service worker caches the application shell and brand assets. API

@@ -7,13 +7,13 @@ import {
     UserRound,
     WifiOff,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom'
 import coach from '../assets/mascot/coach.webp'
 import dinoMark from '../assets/mascot/dino-mark-v2.webp'
 import { setTokenProvider } from '../lib/api'
 import { useAppAuth } from '../lib/auth'
-import { Button, ToastProvider } from './ui'
+import { Button, Field, ToastProvider } from './ui'
 
 const nav = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -56,7 +56,14 @@ export function ProtectedLayout() {
                 <p>Warming up…</p>
             </div>
         )
-    if (!auth.isAuthenticated) return <LoginScreen />
+    if (!auth.isAuthenticated)
+        return (
+            <Navigate
+                to="/login"
+                replace
+                state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
+            />
+        )
     return (
         <ToastProvider>
             <div className="app-shell">
@@ -175,6 +182,50 @@ function OfflineBanner() {
 
 export function LoginScreen() {
     const auth = useAppAuth()
+    const [email, setEmail] = useState('')
+    const [code, setCode] = useState('')
+    const [codeSent, setCodeSent] = useState(false)
+    const [busy, setBusy] = useState(false)
+    const [error, setError] = useState<string>()
+    const [resendAt, setResendAt] = useState(0)
+    const [now, setNow] = useState(Date.now())
+    const resendSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000))
+
+    useEffect(() => {
+        if (!codeSent || resendSeconds === 0) return
+        const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+        return () => window.clearInterval(timer)
+    }, [codeSent, resendSeconds])
+
+    const sendCode = async (event?: FormEvent<HTMLFormElement>) => {
+        event?.preventDefault()
+        setBusy(true)
+        setError(undefined)
+        try {
+            await auth.sendOtp(email.trim().toLowerCase())
+            setCodeSent(true)
+            setCode('')
+            const sentAt = Date.now()
+            setNow(sentAt)
+            setResendAt(sentAt + 60_000)
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : 'Could not send a sign-in code.')
+        } finally {
+            setBusy(false)
+        }
+    }
+    const verifyCode = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        setBusy(true)
+        setError(undefined)
+        try {
+            await auth.verifyOtp(email.trim().toLowerCase(), code.trim())
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : 'That code could not be verified.')
+        } finally {
+            setBusy(false)
+        }
+    }
     return (
         <main className="login-page">
             <div className="login-copy">
@@ -185,7 +236,64 @@ export function LoginScreen() {
                     Track your nutrition, build recipes, scan products, and understand your energy
                     needs.
                 </p>
-                <Button onClick={() => auth.login()}>Start tracking</Button>
+                {codeSent ? (
+                    <form className="login-form" onSubmit={verifyCode}>
+                        <Field label={`Code sent to ${email}`} error={error}>
+                            <input
+                                aria-label="One-time code"
+                                autoComplete="one-time-code"
+                                inputMode="numeric"
+                                maxLength={6}
+                                pattern="[0-9]{6}"
+                                placeholder="123456"
+                                required
+                                value={code}
+                                onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+                            />
+                        </Field>
+                        <Button type="submit" disabled={busy || code.length !== 6}>
+                            {busy ? 'Checking…' : 'Verify code'}
+                        </Button>
+                        <div className="login-form-actions">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={busy || resendSeconds > 0}
+                                onClick={() => void sendCode()}
+                            >
+                                {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend code'}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => {
+                                    setCodeSent(false)
+                                    setCode('')
+                                    setError(undefined)
+                                }}
+                            >
+                                Use another email
+                            </Button>
+                        </div>
+                    </form>
+                ) : (
+                    <form className="login-form" onSubmit={sendCode}>
+                        <Field label="Email address" error={error || auth.initializationError}>
+                            <input
+                                type="email"
+                                autoComplete="email"
+                                placeholder="you@example.com"
+                                required
+                                value={email}
+                                onChange={(event) => setEmail(event.target.value)}
+                            />
+                        </Field>
+                        <Button type="submit" disabled={busy}>
+                            {busy ? 'Sending…' : 'Email me a code'}
+                        </Button>
+                    </form>
+                )}
                 <small>Adult wellness tracking. Not medical advice.</small>
             </div>
             <div className="login-art">
@@ -198,6 +306,7 @@ export function LoginScreen() {
 
 export function LoginRoute() {
     const auth = useAppAuth()
+    const location = useLocation()
     if (auth.isLoading)
         return (
             <div className="auth-loading">
@@ -205,7 +314,12 @@ export function LoginRoute() {
                 <p>Warming up…</p>
             </div>
         )
-    return auth.isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginScreen />
+    const requested = (location.state as { returnTo?: unknown } | null)?.returnTo
+    const returnTo =
+        typeof requested === 'string' && requested.startsWith('/') && !requested.startsWith('//')
+            ? requested
+            : '/dashboard'
+    return auth.isAuthenticated ? <Navigate to={returnTo} replace /> : <LoginScreen />
 }
 
 export function PublicLayout() {

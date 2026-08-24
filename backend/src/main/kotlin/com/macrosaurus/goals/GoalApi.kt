@@ -6,7 +6,6 @@ import com.macrosaurus.measurements.MeasurementService
 import com.macrosaurus.shared.InvalidOperationException
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMin
-import jakarta.validation.constraints.NotBlank
 import org.jooq.DSLContext
 import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.GetMapping
@@ -19,14 +18,20 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
 
+enum class EnergyGoalMode { FIXED, MAINTENANCE, KCAL_DELTA, PERCENT_DELTA }
+
+enum class MacroGoalMode { GUIDED, CUSTOM_GRAMS, PERCENT_SPLIT }
+
+enum class GoalWeightBasis { LATEST_WEIGHT, MANUAL_WEIGHT }
+
 data class GoalSettingsView(
     val configured: Boolean,
-    val energyMode: String?,
+    val energyMode: EnergyGoalMode?,
     val energyValue: BigDecimal?,
-    val macroMode: String?,
+    val macroMode: MacroGoalMode?,
     val proteinGPerKg: BigDecimal?,
     val fatEnergyPercent: BigDecimal?,
-    val weightBasis: String?,
+    val weightBasis: GoalWeightBasis?,
     val manualWeightKg: BigDecimal?,
     val proteinTargetG: BigDecimal?,
     val carbohydrateTargetG: BigDecimal?,
@@ -36,12 +41,12 @@ data class GoalSettingsView(
 )
 
 data class SaveGoalSettingsRequest(
-    @field:NotBlank val energyMode: String,
+    val energyMode: EnergyGoalMode,
     val energyValue: BigDecimal? = null,
-    @field:NotBlank val macroMode: String,
+    val macroMode: MacroGoalMode,
     @field:DecimalMin("0.1") val proteinGPerKg: BigDecimal? = null,
     @field:DecimalMin("0") val fatEnergyPercent: BigDecimal? = null,
-    val weightBasis: String? = null,
+    val weightBasis: GoalWeightBasis? = null,
     @field:DecimalMin("10") val manualWeightKg: BigDecimal? = null,
     @field:DecimalMin("0") val proteinTargetG: BigDecimal? = null,
     @field:DecimalMin("0") val carbohydrateTargetG: BigDecimal? = null,
@@ -57,7 +62,7 @@ data class ResolvedGoalView(
     val carbohydrateG: BigDecimal?,
     val fatG: BigDecimal?,
     val expenditureKcal: BigDecimal?,
-    val energyRule: String?,
+    val energyRule: EnergyGoalMode?,
     val warnings: List<String>,
 )
 
@@ -73,12 +78,12 @@ class GoalService(
                 ?: return GoalSettingsView(false, null, null, null, null, null, null, null, null, null, null, null, null)
         return GoalSettingsView(
             true,
-            record.get("energy_mode", String::class.java),
+            record.get("energy_mode", String::class.java)?.let(EnergyGoalMode::valueOf),
             record.get("energy_value", BigDecimal::class.java),
-            record.get("macro_mode", String::class.java),
+            record.get("macro_mode", String::class.java)?.let(MacroGoalMode::valueOf),
             record.get("protein_g_per_kg", BigDecimal::class.java),
             record.get("fat_energy_percent", BigDecimal::class.java),
-            record.get("weight_basis", String::class.java),
+            record.get("weight_basis", String::class.java)?.let(GoalWeightBasis::valueOf),
             record.get("manual_weight_kg", BigDecimal::class.java),
             record.get("protein_target_g", BigDecimal::class.java),
             record.get("carbohydrate_target_g", BigDecimal::class.java),
@@ -111,12 +116,12 @@ class GoalService(
                 updated_at = current_timestamp
             """.trimIndent(),
             userId,
-            request.energyMode.uppercase(),
+            request.energyMode.name,
             request.energyValue,
-            request.macroMode.uppercase(),
+            request.macroMode.name,
             request.proteinGPerKg,
             request.fatEnergyPercent,
-            request.weightBasis?.uppercase(),
+            request.weightBasis?.name,
             request.manualWeightKg,
             request.proteinTargetG,
             request.carbohydrateTargetG,
@@ -152,19 +157,19 @@ class GoalService(
         val maintenance = estimate.suggestedKcal
         val targetEnergy =
             when (settings.energyMode) {
-                "FIXED" -> {
+                EnergyGoalMode.FIXED -> {
                     settings.energyValue
                 }
 
-                "MAINTENANCE" -> {
+                EnergyGoalMode.MAINTENANCE -> {
                     maintenance
                 }
 
-                "KCAL_DELTA" -> {
+                EnergyGoalMode.KCAL_DELTA -> {
                     maintenance?.add(settings.energyValue ?: BigDecimal.ZERO)
                 }
 
-                "PERCENT_DELTA" -> {
+                EnergyGoalMode.PERCENT_DELTA -> {
                     maintenance?.multiply(
                         BigDecimal.ONE.add(
                             (settings.energyValue ?: BigDecimal.ZERO)
@@ -177,7 +182,7 @@ class GoalService(
                     null
                 }
             }?.takeIf { it > BigDecimal.ZERO }
-        if (settings.energyMode != "FIXED" &&
+        if (settings.energyMode != EnergyGoalMode.FIXED &&
             maintenance == null
         ) {
             warnings += "Complete your profile and add a weigh-in to resolve a relative calorie goal."
@@ -188,13 +193,13 @@ class GoalService(
         var carbohydrate: BigDecimal? = null
         var fat: BigDecimal? = null
         when (settings.macroMode) {
-            "CUSTOM_GRAMS" -> {
+            MacroGoalMode.CUSTOM_GRAMS -> {
                 protein = settings.proteinTargetG
                 carbohydrate = settings.carbohydrateTargetG
                 fat = settings.fatTargetG
             }
 
-            "PERCENT_SPLIT" -> {
+            MacroGoalMode.PERCENT_SPLIT -> {
                 targetEnergy?.let { energy ->
                     protein = gramsFromPercent(energy, settings.proteinEnergyPercent, BigDecimal("4"))
                     carbohydrate = gramsFromPercent(energy, settings.carbohydrateEnergyPercent, BigDecimal("4"))
@@ -206,10 +211,10 @@ class GoalService(
                 }
             }
 
-            "GUIDED" -> {
+            MacroGoalMode.GUIDED -> {
                 targetEnergy?.let { energy ->
                     val weight =
-                        if (settings.weightBasis == "MANUAL_WEIGHT") {
+                        if (settings.weightBasis == GoalWeightBasis.MANUAL_WEIGHT) {
                             settings.manualWeightKg
                         } else {
                             measurements.list(userId, 200).firstOrNull { !it.measuredAt.toLocalDate().isAfter(date) }?.weightKg
@@ -220,8 +225,13 @@ class GoalService(
                         protein = weight.multiply(settings.proteinGPerKg ?: BigDecimal("1.6"))
                     }
                     fat = gramsFromPercent(energy, settings.fatEnergyPercent, BigDecimal("9"))
-                    if (protein != null && fat != null) {
-                        val remaining = energy.subtract(protein!!.multiply(BigDecimal("4"))).subtract(fat!!.multiply(BigDecimal("9")))
+                    val resolvedProtein = protein
+                    val resolvedFat = fat
+                    if (resolvedProtein != null && resolvedFat != null) {
+                        val remaining =
+                            energy
+                                .subtract(resolvedProtein.multiply(BigDecimal("4")))
+                                .subtract(resolvedFat.multiply(BigDecimal("9")))
                         if (remaining < BigDecimal.ZERO) {
                             warnings += "Protein and fat exceed the calorie target; adjust the goal sliders."
                         } else {
@@ -230,6 +240,8 @@ class GoalService(
                     }
                 }
             }
+
+            null -> {}
         }
         return ResolvedGoalView(
             date,
@@ -250,44 +262,38 @@ class GoalService(
     ): BigDecimal? = percent?.let { energy.multiply(it).divide(BigDecimal("100"), 8, RoundingMode.HALF_UP).divide(kcalPerGram, 4, RoundingMode.HALF_UP) }
 
     private fun validate(request: SaveGoalSettingsRequest) {
-        val energyMode = request.energyMode.uppercase()
-        if (energyMode !in
-            setOf("FIXED", "MAINTENANCE", "KCAL_DELTA", "PERCENT_DELTA")
-        ) {
-            throw InvalidOperationException("Unknown energy goal mode")
+        if (request.energyMode != EnergyGoalMode.MAINTENANCE && request.energyValue == null) {
+            throw InvalidOperationException("This energy goal needs a value")
         }
-        if (energyMode != "MAINTENANCE" && request.energyValue == null) throw InvalidOperationException("This energy goal needs a value")
-        if (energyMode == "FIXED" &&
+        if (request.energyMode == EnergyGoalMode.FIXED &&
             request.energyValue!! <= BigDecimal.ZERO
         ) {
             throw InvalidOperationException("Fixed calorie goal must be positive")
         }
-        when (request.macroMode.uppercase()) {
-            "GUIDED" -> {
+        when (request.macroMode) {
+            MacroGoalMode.GUIDED -> {
                 if (request.proteinGPerKg == null ||
                     request.fatEnergyPercent == null
                 ) {
                     throw InvalidOperationException("Guided goals need protein and fat settings")
                 }
-                if (request.weightBasis?.uppercase() !in
-                    setOf("LATEST_WEIGHT", "MANUAL_WEIGHT")
-                ) {
+                if (request.weightBasis == null) {
                     throw InvalidOperationException("Choose a protein weight basis")
                 }
-                if (request.weightBasis.equals("MANUAL_WEIGHT", true) &&
+                if (request.weightBasis == GoalWeightBasis.MANUAL_WEIGHT &&
                     request.manualWeightKg == null
                 ) {
                     throw InvalidOperationException("Manual reference weight is required")
                 }
             }
 
-            "CUSTOM_GRAMS" -> {
+            MacroGoalMode.CUSTOM_GRAMS -> {
                 if (listOf(request.proteinTargetG, request.carbohydrateTargetG, request.fatTargetG).any { it == null }) {
                     throw InvalidOperationException("Custom gram goals need all three macros")
                 }
             }
 
-            "PERCENT_SPLIT" -> {
+            MacroGoalMode.PERCENT_SPLIT -> {
                 if (request.proteinEnergyPercent == null ||
                     request.carbohydrateEnergyPercent == null
                 ) {
@@ -295,10 +301,6 @@ class GoalService(
                 }
                 val fat = BigDecimal("100").subtract(request.proteinEnergyPercent).subtract(request.carbohydrateEnergyPercent)
                 if (fat < BigDecimal.ZERO) throw InvalidOperationException("Macro percentages cannot exceed 100%")
-            }
-
-            else -> {
-                throw InvalidOperationException("Unknown macro goal mode")
             }
         }
     }

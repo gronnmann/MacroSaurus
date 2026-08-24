@@ -28,19 +28,26 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.util.UUID
 
+enum class Meal { BREAKFAST, LUNCH, DINNER, SNACK, OTHER }
+
+enum class DiaryEntryType { FOOD, RECIPE, QUICK }
+
+enum class TrackableType { ALL, FOOD, RECIPE }
+
 data class DiaryEntryView(
     val id: UUID,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime,
-    val meal: String,
+    val meal: Meal,
     val displayName: String,
-    val entryType: String,
+    val entryType: DiaryEntryType,
     val sourceRevisionId: UUID?,
     val quantity: BigDecimal?,
     val unit: String?,
@@ -70,15 +77,15 @@ data class AddFoodEntryRequest(
     @field:NotBlank val unit: String,
     val portionId: UUID? = null,
     val localDate: LocalDate,
-    val consumedAt: OffsetDateTime = OffsetDateTime.now(),
-    @field:NotBlank val meal: String = "OTHER",
+    val consumedAt: OffsetDateTime? = null,
+    val meal: Meal = Meal.OTHER,
 )
 
 data class QuickTrackRequest(
     @field:NotBlank val name: String,
     val localDate: LocalDate,
-    val consumedAt: OffsetDateTime = OffsetDateTime.now(),
-    @field:NotBlank val meal: String = "OTHER",
+    val consumedAt: OffsetDateTime? = null,
+    val meal: Meal = Meal.OTHER,
     @field:DecimalMin("0") val calories: BigDecimal? = null,
     @field:DecimalMin("0") val proteinG: BigDecimal = BigDecimal.ZERO,
     @field:DecimalMin("0") val carbohydrateG: BigDecimal = BigDecimal.ZERO,
@@ -91,14 +98,14 @@ data class AddRecipeEntryRequest(
     val recipeRevisionId: UUID,
     @field:DecimalMin("0.000001") val servings: BigDecimal,
     val localDate: LocalDate,
-    val consumedAt: OffsetDateTime = OffsetDateTime.now(),
-    @field:NotBlank val meal: String = "OTHER",
+    val consumedAt: OffsetDateTime? = null,
+    val meal: Meal = Meal.OTHER,
 )
 
 data class UpdateDiaryEntryRequest(
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime,
-    @field:NotBlank val meal: String,
+    val meal: Meal,
     @field:DecimalMin("0.000001") val quantity: BigDecimal? = null,
     val unit: String? = null,
     val portionId: UUID? = null,
@@ -129,39 +136,12 @@ class TrackingService(
     private val catalog: CatalogService,
     private val recipes: RecipeService,
     private val profiles: ProfileService,
+    private val clock: Clock,
 ) {
     fun day(
         userId: String,
         date: LocalDate,
-    ): DiaryDayView {
-        val entries =
-            db
-                .fetch(
-                    """
-                    select id, local_date, consumed_at, meal, display_name, entry_type, source_revision_id,
-                           quantity, unit, portion_id, nutrients::text as nutrients
-                      from diary_entries where user_id = ? and local_date = ? order by consumed_at, created_at
-                    """.trimIndent(),
-                    userId,
-                    date,
-                ).map { record ->
-                    DiaryEntryView(
-                        record.get("id", UUID::class.java)!!,
-                        record.get("local_date", LocalDate::class.java)!!,
-                        record.get("consumed_at", OffsetDateTime::class.java)!!,
-                        record.get("meal", String::class.java)!!,
-                        record.get("display_name", String::class.java)!!,
-                        record.get("entry_type", String::class.java)!!,
-                        record.get("source_revision_id", UUID::class.java),
-                        record.get("quantity", BigDecimal::class.java),
-                        record.get("unit", String::class.java),
-                        record.get("portion_id", UUID::class.java),
-                        json.nutrients(record.get("nutrients", String::class.java)!!).values,
-                    )
-                }
-        val totals = entries.fold(NutrientValues.EMPTY) { total, entry -> total.plus(NutrientValues(entry.nutrients)) }
-        return DiaryDayView(date, entries, totals.values)
-    }
+    ): DiaryDayView = dayView(date, entries(userId, date, date))
 
     @Transactional
     fun addFood(
@@ -179,17 +159,17 @@ class TrackingService(
             id,
             userId,
             request.localDate,
-            request.consumedAt,
+            request.consumedAt ?: OffsetDateTime.now(clock),
             request.meal,
             resolved.displayName,
-            "FOOD",
+            DiaryEntryType.FOOD,
             request.foodRevisionId,
             request.quantity,
             request.unit,
             request.portionId,
             resolved.nutrients,
         )
-        return day(userId, request.localDate).entries.first { it.id == id }
+        return entry(userId, id)
     }
 
     @Transactional
@@ -211,10 +191,10 @@ class TrackingService(
             id,
             userId,
             request.localDate,
-            request.consumedAt,
+            request.consumedAt ?: OffsetDateTime.now(clock),
             request.meal,
             request.name.trim(),
-            "QUICK",
+            DiaryEntryType.QUICK,
             null,
             BigDecimal.ONE,
             "serving",
@@ -238,7 +218,7 @@ class TrackingService(
                 null
             }
         return QuickTrackResult(
-            day(userId, request.localDate).entries.first { it.id == id },
+            entry(userId, id),
             calculated,
             request.calories?.subtract(calculated),
             saved,
@@ -257,17 +237,17 @@ class TrackingService(
             id,
             userId,
             request.localDate,
-            request.consumedAt,
+            request.consumedAt ?: OffsetDateTime.now(clock),
             request.meal,
             recipe.name,
-            "RECIPE",
+            DiaryEntryType.RECIPE,
             request.recipeRevisionId,
             request.servings,
             "serving",
             null,
             nutrients,
         )
-        return day(userId, request.localDate).entries.first { it.id == id }
+        return entry(userId, id)
     }
 
     @Transactional
@@ -279,37 +259,36 @@ class TrackingService(
         val current = entry(userId, entryId)
         val resolved =
             when (current.entryType) {
-                "FOOD" -> {
-                    val quantity = request.quantity ?: current.quantity ?: throw InvalidOperationException("Food quantity is required")
-                    val unit = request.unit ?: current.unit ?: throw InvalidOperationException("Food unit is required")
+                DiaryEntryType.FOOD -> {
+                    val quantity = request.quantity ?: throw InvalidOperationException("Food quantity is required")
+                    val unit = request.unit?.takeIf { it.isNotBlank() } ?: throw InvalidOperationException("Food unit is required")
                     val revisionId = current.sourceRevisionId ?: throw InvalidOperationException("Food revision is missing")
                     val food = catalog.resolve(userId, revisionId, FoodAmountRequest(quantity, unit, request.portionId))
                     UpdatedEntry(food.displayName, quantity, unit, request.portionId, food.nutrients)
                 }
 
-                "RECIPE" -> {
-                    val servings = request.quantity ?: current.quantity ?: throw InvalidOperationException("Recipe servings are required")
+                DiaryEntryType.RECIPE -> {
+                    val servings = request.quantity ?: throw InvalidOperationException("Recipe servings are required")
                     val revisionId = current.sourceRevisionId ?: throw InvalidOperationException("Recipe revision is missing")
                     val recipe = recipes.getByRevision(userId, revisionId)
                     UpdatedEntry(recipe.name, servings, "serving", null, NutrientValues(recipe.nutrientsPerServing).scaled(servings))
                 }
 
-                "QUICK" -> {
+                DiaryEntryType.QUICK -> {
                     val name =
                         request.name?.trim()?.takeIf { it.isNotBlank() }
                             ?: throw InvalidOperationException("Quick entry name is required")
+                    val protein = request.proteinG ?: throw InvalidOperationException("Quick entry protein is required")
+                    val carbohydrate = request.carbohydrateG ?: throw InvalidOperationException("Quick entry carbohydrate is required")
+                    val fat = request.fatG ?: throw InvalidOperationException("Quick entry fat is required")
                     val macros =
                         linkedMapOf(
-                            "protein_g" to (request.proteinG ?: BigDecimal.ZERO),
-                            "carbohydrate_g" to (request.carbohydrateG ?: BigDecimal.ZERO),
-                            "fat_g" to (request.fatG ?: BigDecimal.ZERO),
+                            "protein_g" to protein,
+                            "carbohydrate_g" to carbohydrate,
+                            "fat_g" to fat,
                         ).apply { request.fiberG?.let { put("fiber_g", it) } }
                     val calories = request.calories ?: NutrientMath.calculatedCalories(macros)
                     UpdatedEntry(name, BigDecimal.ONE, "serving", null, NutrientValues(macros + ("energy_kcal" to calories)))
-                }
-
-                else -> {
-                    throw InvalidOperationException("Unsupported diary entry type")
                 }
             }
         db.execute(
@@ -320,7 +299,7 @@ class TrackingService(
             """.trimIndent(),
             request.localDate,
             request.consumedAt,
-            request.meal.uppercase(),
+            request.meal.name,
             resolved.name,
             resolved.quantity,
             resolved.unit,
@@ -380,20 +359,20 @@ class TrackingService(
         if (to.isBefore(from) || to.isAfter(from.plusDays(92))) {
             throw InvalidOperationException("Summary range must be between 1 and 93 days")
         }
+        val grouped = entries(userId, from, to).groupBy(DiaryEntryView::localDate)
         return generateSequence(from) { current -> current.plusDays(1).takeUnless { it.isAfter(to) } }
-            .map { day(userId, it) }
+            .map { date -> dayView(date, grouped[date].orEmpty()) }
             .toList()
     }
 
     fun trackables(
         userId: String,
         query: String,
-        type: String,
+        type: TrackableType,
         limit: Int,
     ): List<TrackableView> {
-        val normalizedType = type.uppercase()
         val foods =
-            if (normalizedType in setOf("ALL", "FOOD")) {
+            if (type in setOf(TrackableType.ALL, TrackableType.FOOD)) {
                 catalog.search(userId, query, limit).map { food ->
                     TrackableView(
                         "FOOD",
@@ -410,7 +389,7 @@ class TrackingService(
                 emptyList()
             }
         val recipes =
-            if (normalizedType in setOf("ALL", "RECIPE")) {
+            if (type in setOf(TrackableType.ALL, TrackableType.RECIPE)) {
                 recipes
                     .list(userId)
                     .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
@@ -420,7 +399,6 @@ class TrackingService(
             } else {
                 emptyList()
             }
-        if (normalizedType !in setOf("ALL", "FOOD", "RECIPE")) throw InvalidOperationException("Unknown trackable type")
         return (foods + recipes).sortedBy { it.name.lowercase() }.take(limit.coerceIn(1, 100))
     }
 
@@ -429,9 +407,9 @@ class TrackingService(
         userId: String,
         localDate: LocalDate,
         consumedAt: OffsetDateTime,
-        meal: String,
+        meal: Meal,
         displayName: String,
-        type: String,
+        type: DiaryEntryType,
         revisionId: UUID?,
         quantity: BigDecimal?,
         unit: String?,
@@ -448,9 +426,9 @@ class TrackingService(
             userId,
             localDate,
             consumedAt,
-            meal.uppercase(),
+            meal.name,
             displayName,
-            type,
+            type.name,
             revisionId,
             quantity,
             unit,
@@ -473,19 +451,49 @@ class TrackingService(
                 entryId,
                 userId,
             ) ?: throw NotFoundException("Diary entry was not found")
-        return DiaryEntryView(
+        return entryFromRecord(record)
+    }
+
+    private fun entries(
+        userId: String,
+        from: LocalDate,
+        to: LocalDate,
+    ): List<DiaryEntryView> =
+        db
+            .fetch(
+                """
+                select id, local_date, consumed_at, meal, display_name, entry_type, source_revision_id,
+                       quantity, unit, portion_id, nutrients::text as nutrients
+                  from diary_entries
+                 where user_id = ? and local_date between ? and ?
+                 order by local_date, consumed_at, created_at
+                """.trimIndent(),
+                userId,
+                from,
+                to,
+            ).map(::entryFromRecord)
+
+    private fun entryFromRecord(record: org.jooq.Record): DiaryEntryView =
+        DiaryEntryView(
             record.get("id", UUID::class.java)!!,
             record.get("local_date", LocalDate::class.java)!!,
             record.get("consumed_at", OffsetDateTime::class.java)!!,
-            record.get("meal", String::class.java)!!,
+            Meal.valueOf(record.get("meal", String::class.java)!!),
             record.get("display_name", String::class.java)!!,
-            record.get("entry_type", String::class.java)!!,
+            DiaryEntryType.valueOf(record.get("entry_type", String::class.java)!!),
             record.get("source_revision_id", UUID::class.java),
             record.get("quantity", BigDecimal::class.java),
             record.get("unit", String::class.java),
             record.get("portion_id", UUID::class.java),
             json.nutrients(record.get("nutrients", String::class.java)!!).values,
         )
+
+    private fun dayView(
+        date: LocalDate,
+        entries: List<DiaryEntryView>,
+    ): DiaryDayView {
+        val totals = entries.fold(NutrientValues.EMPTY) { total, entry -> total.plus(NutrientValues(entry.nutrients)) }
+        return DiaryDayView(date, entries, totals.values)
     }
 
     private data class UpdatedEntry(
@@ -517,7 +525,7 @@ class TrackingController(
     @GetMapping("/trackables")
     fun trackables(
         @RequestParam(defaultValue = "") query: String,
-        @RequestParam(defaultValue = "ALL") type: String,
+        @RequestParam(defaultValue = "ALL") type: TrackableType,
         @RequestParam(defaultValue = "30") limit: Int,
     ) = tracking.trackables(users.userId(), query, type, limit)
 

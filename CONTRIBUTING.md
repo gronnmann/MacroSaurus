@@ -27,7 +27,7 @@ database exports, user data, generated build output, or IDE configuration.
 - Keep REST DTOs separate from stored source payloads and calculations.
 - Use `BigDecimal` for nutrient, quantity, weight, and energy arithmetic.
 - Treat missing nutrients as unknown. Never synthesize zero for absent source data.
-- Createw immutable revisions for edits that could otherwise change historical
+- Create immutable revisions for edits that could otherwise change historical
   diary or recipe calculations.
 - Validate resource ownership in every user-scoped query.
 - Add Flyway migrations; never modify an already-released migration.
@@ -51,7 +51,7 @@ pnpm --dir web build
 ```
 
 The installed Husky hook runs `pnpm quality` before every commit. Biome owns web
-formatting and linting; Spotless with ktlint owns Kotlin and Gradle formatting.
+formatting and linting; Spotless with ktlint owns Kotlin formatting through Maven.
 Both use four-space indentation. Do not add a second formatter for the same files.
 
 Changes to module dependencies must keep `ModularityTest` passing. Changes to API

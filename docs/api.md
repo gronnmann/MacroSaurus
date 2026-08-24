@@ -16,11 +16,11 @@ ISO-8601 offsets such as `2026-08-17T10:30:00+02:00`.
 Production requests use:
 
 ```http
-Authorization: Bearer <Auth0 access token>
+Authorization: Bearer <Supabase access token>
 ```
 
-When `AUTH0_ISSUER_URI` is blank, authentication is disabled for development.
-Send a stable test identity with:
+When `DEV_AUTH_ENABLED=true`, authentication is disabled for development. Send
+a stable test identity with:
 
 ```http
 X-User-Id: demo-user

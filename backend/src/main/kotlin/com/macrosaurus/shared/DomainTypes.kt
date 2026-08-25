@@ -2,14 +2,6 @@ package com.macrosaurus.shared
 
 import java.math.BigDecimal
 
-enum class BasisType { PER_100_G, PER_100_ML, PER_SERVING }
-
-enum class SourceKind { USDA, OPEN_FOOD_FACTS, USER }
-
-enum class ValueKind { REPORTED, CALCULATED, ESTIMATED }
-
-enum class UnitSystem { METRIC, IMPERIAL }
-
 data class NutrientValues(
     val values: Map<String, BigDecimal>,
 ) {

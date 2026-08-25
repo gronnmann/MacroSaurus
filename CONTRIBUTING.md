@@ -23,7 +23,12 @@ database exports, user data, generated build output, or IDE configuration.
 
 - Put a capability in the package that owns the business rule, not in a generic
   controller/service/repository layer.
-- A module may call another module's public service but may not query its tables.
+- A module may call another module's root-package contract but may not import its
+  internal packages or query its tables.
+- Within a feature, keep HTTP binding in `web`, orchestration and transactions in
+  `application`, framework-free rules in `domain`, and jOOQ in `persistence`.
+- Do not create a global `models` package; transport DTOs and domain snapshots
+  belong to the feature that owns their meaning.
 - Keep REST DTOs separate from stored source payloads and calculations.
 - Use `BigDecimal` for nutrient, quantity, weight, and energy arithmetic.
 - Treat missing nutrients as unknown. Never synthesize zero for absent source data.

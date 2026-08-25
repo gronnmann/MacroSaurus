@@ -1,2 +1,2 @@
-@org.springframework.modulith.ApplicationModule(allowedDependencies = {"catalog", "identity", "shared"})
+@org.springframework.modulith.ApplicationModule(allowedDependencies = {"catalog", "shared"})
 package com.macrosaurus.recipes;

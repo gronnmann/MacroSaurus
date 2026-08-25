@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Beef, BookOpen, Camera, ChevronRight, Scale, Search, Utensils, X, Zap } from 'lucide-react'
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Field, Skeleton, StatePanel, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
 import { formatNumber, kcal, localDate } from '../lib/utils'
-import type { Trackable } from '../types'
+import type { Food, Nutrients, Trackable } from '../types'
 import { ScanExperience } from './scan'
 
 type TrackMode = 'home' | 'search' | 'quick' | 'scan' | 'weight'
@@ -14,6 +14,7 @@ export function TrackPage() {
     const location = useLocation()
     const navigate = useNavigate()
     const [mode, setMode] = useState<TrackMode>('home')
+    const [scanned, setScanned] = useState<Trackable>()
     const from = (location.state as { from?: string } | null)?.from || '/dashboard'
     const close = () => navigate(from, { replace: true })
     return (
@@ -52,7 +53,16 @@ export function TrackPage() {
                 {mode === 'home' && <TrackHome onMode={setMode} />}{' '}
                 {mode === 'search' && <TrackSearch onDone={close} />}{' '}
                 {mode === 'quick' && <QuickEntry onDone={close} />}{' '}
-                {mode === 'scan' && <ScanExperience />}
+                {mode === 'scan' &&
+                    (scanned ? (
+                        <AmountForm
+                            item={scanned}
+                            onBack={() => setScanned(undefined)}
+                            onDone={close}
+                        />
+                    ) : (
+                        <ScanExperience onFoodReady={(food) => setScanned(trackableFood(food))} />
+                    ))}
                 {mode === 'weight' && <WeightEntry onDone={close} />}
             </section>
         </div>
@@ -206,12 +216,44 @@ function AmountForm({
 }) {
     const client = useQueryClient()
     const toast = useToast()
+    const initializedFood = useRef(false)
+    const [foodReady, setFoodReady] = useState(item.type !== 'FOOD')
+    const [quantity, setQuantity] = useState<number | ''>(item.type === 'FOOD' ? 100 : 1)
     const [unit, setUnit] = useState(item.type === 'FOOD' ? 'g' : 'serving')
+    const [portionId, setPortionId] = useState('')
     const food = useQuery({
         queryKey: queryKeys.food(item.id),
         queryFn: () => api.food(item.id),
         enabled: item.type === 'FOOD',
     })
+    useEffect(() => {
+        if (!food.data || initializedFood.current) return
+        initializedFood.current = true
+        setQuantity(food.data.basisAmount)
+        setUnit(defaultFoodUnit(food.data))
+        setPortionId(food.data.portions.find((portion) => portion.default)?.id || '')
+        setFoodReady(true)
+    }, [food.data])
+    const numericQuantity = Number(quantity)
+    const resolved = useQuery({
+        queryKey: ['resolved-food', item.revisionId, numericQuantity, unit, portionId],
+        queryFn: () =>
+            api.resolveFood(item.revisionId, {
+                quantity: numericQuantity,
+                unit,
+                portionId: unit === 'portion' ? portionId : null,
+            }),
+        enabled:
+            item.type === 'FOOD' &&
+            foodReady &&
+            Number.isFinite(numericQuantity) &&
+            numericQuantity > 0 &&
+            (unit !== 'portion' || Boolean(portionId)),
+    })
+    const preview =
+        item.type === 'RECIPE'
+            ? scaleNutrients(item.nutrients, numericQuantity)
+            : resolved.data?.nutrients
     const add = useMutation({
         mutationFn: (payload: unknown) =>
             item.type === 'FOOD' ? api.addFoodEntry(payload) : api.addRecipeEntry(payload),
@@ -224,7 +266,6 @@ function AmountForm({
     })
     const submit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
-        const data = new FormData(event.currentTarget)
         const trackedAt = new Date()
         const common = {
             localDate: localDate(trackedAt),
@@ -235,17 +276,18 @@ function AmountForm({
             add.mutate({
                 ...common,
                 foodRevisionId: item.revisionId,
-                quantity: Number(data.get('quantity')),
+                quantity: numericQuantity,
                 unit,
-                portionId: unit === 'portion' ? data.get('portionId') : null,
+                portionId: unit === 'portion' ? portionId : null,
             })
         else
             add.mutate({
                 ...common,
                 recipeRevisionId: item.revisionId,
-                servings: Number(data.get('quantity')),
+                servings: numericQuantity,
             })
     }
+    const units = food.data ? foodUnits(food.data) : []
     return (
         <form className="track-amount" onSubmit={submit}>
             <button type="button" className="sheet-back" onClick={onBack}>
@@ -257,39 +299,55 @@ function AmountForm({
                 </span>
                 <div>
                     <h2>{item.name}</h2>
-                    <p>
-                        {item.brand || item.servingLabel} · {kcal(item.nutrients)} kcal
-                    </p>
+                    <p>{item.brand || (item.type === 'RECIPE' ? 'Recipe' : 'Food')}</p>
                 </div>
             </div>
-            <div className="form-grid">
+            <LiveNutrition nutrients={preview} pending={resolved.isFetching} />
+            <div className="track-amount-entry">
                 <Field label={item.type === 'FOOD' ? 'Amount' : 'Servings'}>
                     <input
                         name="quantity"
                         type="number"
                         min="0.000001"
                         step="any"
+                        inputMode="decimal"
                         required
-                        defaultValue={item.type === 'FOOD' ? 100 : 1}
+                        value={quantity}
+                        onChange={(event) =>
+                            setQuantity(event.target.value === '' ? '' : event.target.valueAsNumber)
+                        }
                     />
                 </Field>
                 {item.type === 'FOOD' && (
-                    <Field label="Unit">
-                        <select value={unit} onChange={(event) => setUnit(event.target.value)}>
-                            <option value="g">grams</option>
-                            <option value="ml">millilitres</option>
-                            {food.data?.basisType === 'PER_SERVING' && (
-                                <option value="serving">servings</option>
-                            )}
-                            {food.data?.portions.length ? (
-                                <option value="portion">named portion</option>
-                            ) : null}
-                        </select>
-                    </Field>
+                    <fieldset className="track-unit-picker">
+                        <legend>Unit</legend>
+                        <div>
+                            {units.map((option) => (
+                                <button
+                                    type="button"
+                                    className={unit === option.value ? 'active' : ''}
+                                    key={option.value}
+                                    onClick={() => {
+                                        setUnit(option.value)
+                                        if (option.value === 'portion' && !portionId) {
+                                            setPortionId(food.data?.portions[0]?.id || '')
+                                        }
+                                    }}
+                                >
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
+                    </fieldset>
                 )}
                 {unit === 'portion' && (
-                    <Field className="span-2" label="Portion">
-                        <select name="portionId" required>
+                    <Field label="Portion">
+                        <select
+                            name="portionId"
+                            required
+                            value={portionId}
+                            onChange={(event) => setPortionId(event.target.value)}
+                        >
                             <option value="">Choose portion…</option>
                             {food.data?.portions.map((portion) => (
                                 <option value={portion.id} key={portion.id}>
@@ -302,13 +360,80 @@ function AmountForm({
                         </select>
                     </Field>
                 )}
-                <p className="track-now span-2">Logged at the current date and time</p>
-                <Button className="span-2" type="submit" disabled={add.isPending}>
+                {resolved.isError && (
+                    <p className="field-error">This amount cannot be converted using that unit.</p>
+                )}
+                <Button
+                    className="track-add-button"
+                    type="submit"
+                    disabled={
+                        add.isPending || numericQuantity <= 0 || (item.type === 'FOOD' && !preview)
+                    }
+                >
                     {add.isPending ? 'Adding…' : 'Add to Food Log'}
                 </Button>
             </div>
         </form>
     )
+}
+
+function LiveNutrition({ nutrients, pending }: { nutrients?: Nutrients; pending: boolean }) {
+    const values = [
+        { code: 'energy_kcal', label: 'Calories', unit: '' },
+        { code: 'protein_g', label: 'Protein', unit: 'g' },
+        { code: 'fat_g', label: 'Fat', unit: 'g' },
+        { code: 'carbohydrate_g', label: 'Carbs', unit: 'g' },
+    ] as const
+    return (
+        <div className="track-live-nutrition" aria-live="polite" aria-busy={pending}>
+            {values.map((value) => (
+                <div key={value.code}>
+                    <strong>
+                        {nutrients
+                            ? formatNumber(nutrients[value.code], value.unit)
+                            : pending
+                              ? '…'
+                              : '—'}
+                    </strong>
+                    <span>{value.label}</span>
+                </div>
+            ))}
+        </div>
+    )
+}
+
+function defaultFoodUnit(food: Food) {
+    if (food.basisType === 'PER_100_ML') return 'ml'
+    if (food.basisType === 'PER_SERVING') return 'serving'
+    return 'g'
+}
+
+function foodUnits(food: Food) {
+    const units: Array<{ value: string; label: string }> = []
+    if (food.basisType === 'PER_100_G' || food.densityGPerMl) units.push({ value: 'g', label: 'g' })
+    if (food.basisType === 'PER_100_ML' || food.densityGPerMl)
+        units.push({ value: 'ml', label: 'ml' })
+    if (food.basisType === 'PER_SERVING') units.push({ value: 'serving', label: 'serving' })
+    if (food.portions.length) units.push({ value: 'portion', label: 'portion' })
+    return units
+}
+
+function scaleNutrients(nutrients: Nutrients, factor: number): Nutrients {
+    return Object.fromEntries(
+        Object.entries(nutrients).map(([code, value]) => [code, value * factor]),
+    )
+}
+
+function trackableFood(food: Food): Trackable {
+    return {
+        type: 'FOOD',
+        id: food.id,
+        revisionId: food.revisionId,
+        name: food.name,
+        brand: food.brand,
+        servingLabel: `${formatNumber(food.basisAmount)} ${food.basisUnit}`,
+        nutrients: food.nutrients,
+    }
 }
 
 function QuickEntry({ onDone }: { onDone: () => void }) {

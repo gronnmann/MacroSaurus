@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { BarcodeFormat, BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
-import { Camera, Check, FileImage, Keyboard, ScanLine, X } from 'lucide-react'
+import { Camera, FileImage, Keyboard, ScanLine, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { FoodForm } from '../components/food-form'
@@ -16,7 +16,6 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { kcal } from '../lib/utils'
 import type { Food, FoodInput } from '../types'
 
 export function ScanPage() {
@@ -32,7 +31,7 @@ export function ScanPage() {
     )
 }
 
-export function ScanExperience() {
+export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => void } = {}) {
     const [code, setCode] = useState('')
     const [camera, setCamera] = useState(false)
     const [cameraError, setCameraError] = useState('')
@@ -41,17 +40,21 @@ export function ScanExperience() {
     const controls = useRef<IScannerControls | undefined>(undefined)
     const navigate = useNavigate()
     const toast = useToast()
-    const lookup = useMutation({
-        mutationFn: api.barcode,
-        onError: (error) => toast.push('Barcode lookup failed', error.message, 'error'),
-    })
     const importer = useMutation({
         mutationFn: api.importBarcode,
         onSuccess: (food) => {
             toast.push('Product ready')
-            navigate(`/foods/${food.id}`)
+            if (onFoodReady) onFoodReady(food)
+            else navigate(`/foods/${food.id}`)
         },
         onError: (error) => toast.push('Could not add product', error.message, 'error'),
+    })
+    const lookup = useMutation({
+        mutationFn: api.barcode,
+        onSuccess: (candidates, barcode) => {
+            if (candidates.length > 0) importer.mutate(barcode)
+        },
+        onError: (error) => toast.push('Barcode lookup failed', error.message, 'error'),
     })
     const scan = useMutation({
         mutationFn: api.startScan,
@@ -180,35 +183,7 @@ export function ScanExperience() {
                 </div>
                 {codeError && <p className="field-error">{codeError}</p>}
             </Card>
-            {lookup.isPending && <Skeleton lines={3} />}{' '}
-            {lookup.data && lookup.data.length > 0 && (
-                <Card>
-                    <SectionHeader
-                        eyebrow="MATCH FOUND"
-                        title={lookup.data.length === 1 ? lookup.data[0].name : 'Choose a product'}
-                    />
-                    <div className="candidate-list">
-                        {lookup.data.map((candidate) => (
-                            <article key={`${candidate.externalId}-${candidate.barcode}`}>
-                                <div>
-                                    <h3>{candidate.name}</h3>
-                                    <p>
-                                        {candidate.brand || 'No brand'} ·{' '}
-                                        {kcal(candidate.nutrients)} kcal per 100
-                                    </p>
-                                </div>
-                                <Button
-                                    onClick={() => importer.mutate(candidate.barcode)}
-                                    disabled={importer.isPending}
-                                >
-                                    <Check />
-                                    Use product
-                                </Button>
-                            </article>
-                        ))}
-                    </div>
-                </Card>
-            )}
+            {(lookup.isPending || importer.isPending) && <Skeleton lines={3} />}
             {lookup.data?.length === 0 && (
                 <Card className="label-fallback">
                     <SectionHeader

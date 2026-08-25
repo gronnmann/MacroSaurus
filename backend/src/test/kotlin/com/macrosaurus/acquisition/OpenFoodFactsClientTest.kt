@@ -1,6 +1,7 @@
 package com.macrosaurus.acquisition
 
-import com.macrosaurus.shared.SourceKind
+import com.macrosaurus.acquisition.integration.parseOpenFoodFactsCandidate
+import com.macrosaurus.catalog.SourceKind
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import tools.jackson.databind.ObjectMapper

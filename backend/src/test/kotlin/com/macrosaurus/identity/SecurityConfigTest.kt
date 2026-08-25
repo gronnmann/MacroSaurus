@@ -1,5 +1,6 @@
 package com.macrosaurus.identity
 
+import com.macrosaurus.identity.config.supabaseJwtValidator
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.security.oauth2.jwt.Jwt

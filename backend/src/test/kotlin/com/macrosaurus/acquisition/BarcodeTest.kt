@@ -1,5 +1,6 @@
 package com.macrosaurus.acquisition
 
+import com.macrosaurus.acquisition.domain.Barcode
 import com.macrosaurus.shared.InvalidOperationException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy

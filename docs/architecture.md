@@ -24,35 +24,63 @@ flowchart LR
 
 | Module | Owns | May depend on |
 |---|---|---|
-| `identity` | Request user identity, profiles, nutrient targets, security configuration | `shared` |
-| `catalog` | Nutrient definitions, foods, immutable food revisions, portions | `identity`, `shared` |
-| `recipes` | Recipe revisions, ingredient quantities, yields | `catalog`, `identity`, `shared` |
+| `identity` | Request user identity, profiles, nutrient targets, security configuration | `catalog`, `shared` |
+| `catalog` | Nutrient definitions, foods, immutable food revisions, portions | `shared` |
+| `recipes` | Recipe revisions, ingredient quantities, yields | `catalog`, `shared` |
 | `tracking` | Diary entries, quick tracking, daily totals | `catalog`, `recipes`, `identity`, `shared` |
-| `measurements` | Weight measurements | `identity`, `shared` |
+| `measurements` | Weight measurements | `shared` |
 | `expenditure` | Baseline and adaptive expenditure estimates | `identity`, `measurements`, `tracking`, `shared` |
-| `goals` | Calorie rules and resolved macro targets | `expenditure`, `measurements`, `identity`, `shared` |
-| `acquisition` | EAN/UPC validation, OFF lookup, OpenRouter extraction | `catalog`, `identity`, `shared` |
-| `sharing` | Revocable immutable snapshots | `catalog`, `recipes`, `identity`, `shared` |
-| `shared` | Nutrient arithmetic, small enums, JSON support, API problems | Nothing feature-specific |
+| `goals` | Calorie rules and resolved macro targets | `expenditure`, `measurements`, `shared` |
+| `acquisition` | EAN/UPC validation, OFF lookup, OpenRouter extraction | `catalog`, `shared` |
+| `sharing` | Revocable immutable snapshots | `catalog`, `recipes`, `shared` |
+| `shared` | Nutrient arithmetic, JSON support, current-user contract, API problems | Nothing feature-specific |
 
 Dependency direction is intentionally one-way:
 
 ```mermaid
 flowchart TD
     shared
-    identity --> shared
-    catalog --> identity
     catalog --> shared
+    identity --> catalog
+    identity --> shared
     recipes --> catalog
+    recipes --> shared
     tracking --> catalog
     tracking --> recipes
-    measurements --> identity
+    tracking --> identity
+    tracking --> shared
+    measurements --> shared
+    expenditure --> identity
     expenditure --> measurements
     expenditure --> tracking
+    expenditure --> shared
+    goals --> expenditure
+    goals --> measurements
+    goals --> shared
     acquisition --> catalog
+    acquisition --> shared
     sharing --> catalog
     sharing --> recipes
+    sharing --> shared
 ```
+
+Every module exposes only cross-module contracts from its root package. Its
+implementation is organized below that root:
+
+```text
+feature/
+├── package-info.java   Modulith boundary and allowed dependencies
+├── *Types.kt           Stable cross-module interfaces and snapshots, when needed
+├── web/                Spring MVC controllers and transport DTOs
+├── application/        Use-case orchestration and transaction boundaries
+├── domain/             Framework-free calculations and invariants
+├── persistence/        jOOQ queries and database record mapping
+└── integration/        External provider adapters, when needed
+```
+
+Small modules omit layers they do not need. Related DTOs are grouped by transport
+or capability; the project does not use a global `models` package or require one
+class per file.
 
 `ModularityTest` calls `ApplicationModules.verify()` and fails when code introduces
 cycles or violates Spring Modulith's module rules.
@@ -60,7 +88,7 @@ cycles or violates Spring Modulith's module rules.
 ## Module rules
 
 1. A module owns its tables and business invariants.
-2. A module may call another module's public application service.
+2. A module may call another module only through a root-package contract.
 3. A module must not issue SQL against another module's tables.
 4. REST request/response classes belong to the module that exposes the endpoint.
 5. Source-provider payloads are translated at the acquisition boundary.
@@ -68,6 +96,8 @@ cycles or violates Spring Modulith's module rules.
    domain dumping ground.
 7. Historical calculations reference immutable revisions or store nutrient
    snapshots.
+8. `DSLContext` and SQL stay in `persistence`; Spring MVC and Jakarta validation
+   stay in `web`; `domain` code remains framework-free.
 
 The current code uses jOOQ's `DSLContext` with explicit SQL. Flyway, not application
 startup code, owns schema evolution.

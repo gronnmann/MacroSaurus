@@ -2216,8 +2216,94 @@
     margin: 0.2rem 0 0;
     color: var(--muted);
 }
-.track-amount .form-grid {
+.track-live-nutrition {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.55rem;
     margin-top: 1rem;
+}
+.track-live-nutrition > div {
+    display: grid;
+    min-width: 0;
+    gap: 0.12rem;
+    border-radius: 14px;
+    background: #edf4e9;
+    padding: 0.9rem 0.55rem;
+    text-align: center;
+}
+.track-live-nutrition > div:nth-child(2) {
+    background: #fff0e2;
+}
+.track-live-nutrition > div:nth-child(3) {
+    background: #e5f5f3;
+}
+.track-live-nutrition > div:nth-child(4) {
+    background: #eef3da;
+}
+.track-live-nutrition strong {
+    overflow: hidden;
+    font-size: clamp(1.4rem, 4vw, 2rem);
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.track-live-nutrition span {
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 750;
+}
+.track-amount-entry {
+    display: grid;
+    gap: 0.85rem;
+    margin-top: 1rem;
+    border-radius: 18px;
+    background: #e3e5e4;
+    padding: 1rem;
+}
+.track-amount-entry input[type="number"] {
+    min-height: 62px;
+    border: 2px solid var(--green-950);
+    background: white;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+.track-unit-picker {
+    min-width: 0;
+    margin: 0;
+    border: 0;
+    padding: 0;
+}
+.track-unit-picker legend {
+    margin-bottom: 0.4rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+.track-unit-picker > div {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    scrollbar-width: none;
+}
+.track-unit-picker button {
+    min-width: 76px;
+    min-height: 48px;
+    flex: 1 0 auto;
+    border: 1px solid #d4d7d5;
+    border-radius: 999px;
+    background: white;
+    padding: 0.6rem 1rem;
+    cursor: pointer;
+    font-weight: 800;
+}
+.track-unit-picker button.active {
+    border-color: var(--green-950);
+    background: var(--green-950);
+    color: white;
+}
+.track-add-button {
+    min-height: 54px;
 }
 .track-now {
     margin: 0;

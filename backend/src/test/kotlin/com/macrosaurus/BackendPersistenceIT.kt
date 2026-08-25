@@ -1,21 +1,24 @@
 package com.macrosaurus
 
-import com.macrosaurus.catalog.CatalogService
-import com.macrosaurus.catalog.CreateFoodRequest
-import com.macrosaurus.catalog.FoodAmountRequest
-import com.macrosaurus.measurements.AddWeightRequest
-import com.macrosaurus.measurements.MeasurementService
-import com.macrosaurus.recipes.RecipeIngredientInput
-import com.macrosaurus.recipes.RecipeService
-import com.macrosaurus.recipes.SaveRecipeRequest
-import com.macrosaurus.shared.BasisType
+import com.macrosaurus.catalog.BasisType
+import com.macrosaurus.catalog.FoodAmount
+import com.macrosaurus.catalog.FoodCatalog
+import com.macrosaurus.catalog.FoodCreator
+import com.macrosaurus.catalog.FoodDraft
+import com.macrosaurus.catalog.FoodResolver
+import com.macrosaurus.catalog.SourceKind
+import com.macrosaurus.measurements.application.AddWeightCommand
+import com.macrosaurus.measurements.application.MeasurementService
+import com.macrosaurus.recipes.application.RecipeIngredientCommand
+import com.macrosaurus.recipes.application.RecipeService
+import com.macrosaurus.recipes.application.SaveRecipeCommand
 import com.macrosaurus.shared.NotFoundException
-import com.macrosaurus.sharing.CreateShareRequest
-import com.macrosaurus.sharing.ShareResourceType
-import com.macrosaurus.sharing.SharingService
-import com.macrosaurus.tracking.AddFoodEntryRequest
+import com.macrosaurus.sharing.application.CreateShareCommand
+import com.macrosaurus.sharing.application.ShareResourceType
+import com.macrosaurus.sharing.application.SharingService
 import com.macrosaurus.tracking.Meal
-import com.macrosaurus.tracking.TrackingService
+import com.macrosaurus.tracking.application.AddFoodEntryCommand
+import com.macrosaurus.tracking.application.TrackingService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -33,7 +36,11 @@ import java.time.OffsetDateTime
     ],
 )
 class BackendPersistenceIT {
-    @Autowired private lateinit var catalog: CatalogService
+    @Autowired private lateinit var catalog: FoodCatalog
+
+    @Autowired private lateinit var foodCreator: FoodCreator
+
+    @Autowired private lateinit var foodResolver: FoodResolver
 
     @Autowired private lateinit var recipes: RecipeService
 
@@ -46,28 +53,52 @@ class BackendPersistenceIT {
     @Test
     fun `food recipe diary measurement and sharing flows retain snapshots and ownership`() {
         val userId = "integration-user"
+        val barcode = "3017620422003"
+        foodCreator.create(
+            userId,
+            FoodDraft(
+                name = "Shared barcode food",
+                barcode = barcode,
+                nutrients = mapOf("energy_kcal" to BigDecimal("100")),
+            ),
+            SourceKind.USDA,
+            "integration-shared-food",
+        )
         val food =
-            catalog.create(
+            foodCreator.create(
                 userId,
-                CreateFoodRequest(
+                FoodDraft(
                     name = "Integration oats",
+                    barcode = barcode,
                     basisType = BasisType.PER_100_G,
                     basisAmount = BigDecimal("100"),
                     basisUnit = "g",
                     nutrients = mapOf("energy_kcal" to BigDecimal("380"), "protein_g" to BigDecimal("13")),
                 ),
             )
+        foodCreator.create(
+            "another-user",
+            FoodDraft(
+                name = "Another user's barcode food",
+                barcode = barcode,
+                nutrients = mapOf("energy_kcal" to BigDecimal("200")),
+            ),
+        )
         val foundFood = catalog.search(userId, "Integration oats").single()
         assertThat(foundFood.nutrients["protein_g"]).isEqualByComparingTo("13")
+        assertThat(catalog.byBarcode(userId, barcode).first().id).isEqualTo(food.id)
+        assertThat(catalog.byBarcode(userId, barcode).map { it.name })
+            .doesNotContain("Another user's barcode food")
         assertThatThrownBy { catalog.get("another-user", food.id) }.isInstanceOf(NotFoundException::class.java)
 
         val recipe =
             recipes.create(
                 userId,
-                SaveRecipeRequest(
+                SaveRecipeCommand(
                     name = "Integration porridge",
                     servings = BigDecimal("2"),
-                    ingredients = listOf(RecipeIngredientInput(food.revisionId, BigDecimal("200"), "g")),
+                    finishedWeightG = null,
+                    ingredients = listOf(RecipeIngredientCommand(food.revisionId, BigDecimal("200"), "g", null)),
                 ),
             )
         assertThat(recipe.nutrientsPerServing["protein_g"]).isEqualByComparingTo("13")
@@ -75,7 +106,7 @@ class BackendPersistenceIT {
         val date = LocalDate.of(2026, 8, 22)
         tracking.addFood(
             userId,
-            AddFoodEntryRequest(
+            AddFoodEntryCommand(
                 foodRevisionId = food.revisionId,
                 quantity = BigDecimal("50"),
                 unit = "g",
@@ -88,15 +119,15 @@ class BackendPersistenceIT {
         assertThat(summary).hasSize(3)
         assertThat(summary[1].totals["protein_g"]).isEqualByComparingTo("6.5")
 
-        val weight = measurements.add(userId, AddWeightRequest(BigDecimal("82.4")))
-        assertThat(measurements.list(userId).map { it.id }).contains(weight.id)
+        val weight = measurements.add(userId, AddWeightCommand(BigDecimal("82.4"), null, null))
+        assertThat(measurements.list(userId, 100).map { it.id }).contains(weight.id)
 
-        val share = sharing.create(userId, CreateShareRequest(ShareResourceType.FOOD, food.revisionId))
+        val share = sharing.create(userId, CreateShareCommand(ShareResourceType.FOOD, food.revisionId, null))
         assertThat(sharing.get(share.urlToken).resourceType).isEqualTo(ShareResourceType.FOOD)
         val expiredShare =
             sharing.create(
                 userId,
-                CreateShareRequest(
+                CreateShareCommand(
                     ShareResourceType.FOOD,
                     food.revisionId,
                     OffsetDateTime.parse("2020-01-01T00:00:00Z"),
@@ -104,7 +135,7 @@ class BackendPersistenceIT {
             )
         assertThatThrownBy { sharing.get(expiredShare.urlToken) }.isInstanceOf(NotFoundException::class.java)
 
-        val resolved = catalog.resolve(userId, food.revisionId, FoodAmountRequest(BigDecimal("25"), "g"))
+        val resolved = foodResolver.resolve(userId, food.revisionId, FoodAmount(BigDecimal("25"), "g"))
         assertThat(resolved.nutrients["protein_g"]).isEqualByComparingTo("3.25")
     }
 }

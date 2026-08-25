@@ -104,9 +104,11 @@ docker compose up -d postgres
 ## Adding a backend feature
 
 1. Decide which module owns the rule.
-2. Add request/response types, application service, and controller in that module.
+2. Add transport DTOs and a controller under `web`, orchestration under
+   `application`, pure rules under `domain`, and SQL under `persistence`.
 3. Add a Flyway migration if persistence changes.
-4. Depend only on another module's public services.
+4. Put only stable cross-module interfaces and snapshots in the feature root;
+   depend on those contracts rather than another feature's implementation.
 5. Add unit tests for calculations and failure modes.
 6. Run `ModularityTest` with the full backend test task.
 7. Update `docs/api.md`, `docs/data-model.md`, or configuration docs as relevant.

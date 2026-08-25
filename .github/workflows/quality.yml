@@ -3,7 +3,7 @@ name: Quality and containers
 on:
     pull_request:
     push:
-        branches: [main]
+        branches: [master]
         tags: ["v*"]
     workflow_dispatch:
 

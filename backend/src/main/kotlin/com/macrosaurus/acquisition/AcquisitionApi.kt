@@ -77,42 +77,49 @@ class OpenFoodFactsClient(
                     .header("User-Agent", userAgent)
                     .retrieve()
                     .body(String::class.java) ?: return null
-            val root = mapper.readTree(payload)
-            if (root.path("status").asInt(0) != 1) return null
-            val product = root.path("product")
-            val name = product.path("product_name").asString("").ifBlank { return null }
-            val nutriments = product.path("nutriments")
-
-            fun decimal(key: String): BigDecimal? =
-                nutriments
-                    .path(key)
-                    .takeUnless(JsonNode::isMissingNode)
-                    ?.takeUnless(JsonNode::isNull)
-                    ?.decimalValue()
-            val nutrients =
-                linkedMapOf<String, BigDecimal>().apply {
-                    decimal("energy-kcal_100g")?.let { put("energy_kcal", it) }
-                    decimal("proteins_100g")?.let { put("protein_g", it) }
-                    decimal("carbohydrates_100g")?.let { put("carbohydrate_g", it) }
-                    decimal("fat_100g")?.let { put("fat_g", it) }
-                    decimal("fiber_100g")?.let { put("fiber_g", it) }
-                    decimal("sugars_100g")?.let { put("sugars_g", it) }
-                    decimal("saturated-fat_100g")?.let { put("saturated_fat_g", it) }
-                    decimal("sodium_100g")?.multiply(BigDecimal("1000"))?.let { put("sodium_mg", it) }
-                }
-            BarcodeCandidate(
-                barcode,
-                name,
-                product.path("brands").asString("").ifBlank { null },
-                SourceKind.OPEN_FOOD_FACTS,
-                BasisType.PER_100_G,
-                nutrients,
-                barcode,
-            )
+            parseOpenFoodFactsCandidate(barcode, payload, mapper)
         } catch (error: Exception) {
             throw ExternalServiceException("Open Food Facts lookup failed", error)
         }
     }
+}
+
+internal fun parseOpenFoodFactsCandidate(
+    barcode: String,
+    payload: String,
+    mapper: ObjectMapper,
+): BarcodeCandidate? {
+    val root = mapper.readTree(payload)
+    val product = root.path("product").takeIf(JsonNode::isObject) ?: return null
+    val name = product.path("product_name").asString("").ifBlank { return null }
+    val nutriments = product.path("nutriments")
+
+    fun decimal(key: String): BigDecimal? =
+        nutriments
+            .path(key)
+            .takeUnless(JsonNode::isMissingNode)
+            ?.takeUnless(JsonNode::isNull)
+            ?.decimalValue()
+    val nutrients =
+        linkedMapOf<String, BigDecimal>().apply {
+            decimal("energy-kcal_100g")?.let { put("energy_kcal", it) }
+            decimal("proteins_100g")?.let { put("protein_g", it) }
+            decimal("carbohydrates_100g")?.let { put("carbohydrate_g", it) }
+            decimal("fat_100g")?.let { put("fat_g", it) }
+            decimal("fiber_100g")?.let { put("fiber_g", it) }
+            decimal("sugars_100g")?.let { put("sugars_g", it) }
+            decimal("saturated-fat_100g")?.let { put("saturated_fat_g", it) }
+            decimal("sodium_100g")?.multiply(BigDecimal("1000"))?.let { put("sodium_mg", it) }
+        }
+    return BarcodeCandidate(
+        barcode,
+        name,
+        product.path("brands").asString("").ifBlank { null },
+        SourceKind.OPEN_FOOD_FACTS,
+        BasisType.PER_100_G,
+        nutrients,
+        barcode,
+    )
 }
 
 @Service

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Beef, BookOpen, Camera, ChevronRight, Scale, Search, Utensils, X, Zap } from 'lucide-react'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Field, Skeleton, StatePanel, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
@@ -17,7 +18,14 @@ export function TrackPage() {
     const [scanned, setScanned] = useState<Trackable>()
     const from = (location.state as { from?: string } | null)?.from || '/dashboard'
     const close = () => navigate(from, { replace: true })
-    return (
+    useEffect(() => {
+        const previousOverflow = document.body.style.overflow
+        document.body.style.overflow = 'hidden'
+        return () => {
+            document.body.style.overflow = previousOverflow
+        }
+    }, [])
+    return createPortal(
         <div className="track-overlay">
             <button
                 type="button"
@@ -65,7 +73,8 @@ export function TrackPage() {
                     ))}
                 {mode === 'weight' && <WeightEntry onDone={close} />}
             </section>
-        </div>
+        </div>,
+        document.body,
     )
 }
 

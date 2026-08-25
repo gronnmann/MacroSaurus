@@ -146,26 +146,12 @@ function OfflineBanner() {
     }, [])
     const {
         offlineReady: [offlineReady, setOfflineReady],
-        needRefresh: [needRefresh, setNeedRefresh],
-        updateServiceWorker,
     } = useRegisterSW()
     if (!online)
         return (
             <div className="offline-banner">
                 <WifiOff />
                 You are offline. Reconnect to save changes.
-            </div>
-        )
-    if (needRefresh)
-        return (
-            <div className="offline-banner offline-banner--update">
-                <span>An update is ready.</span>
-                <button type="button" onClick={() => updateServiceWorker(true)}>
-                    Update now
-                </button>
-                <button type="button" onClick={() => setNeedRefresh(false)}>
-                    Later
-                </button>
             </div>
         )
     if (offlineReady)

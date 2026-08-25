@@ -313,6 +313,26 @@ test('mobile layout has the raised centered Track action', async ({ page }, test
     })
 })
 
+test('mobile tracking surface exactly fills the viewport', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'mobile-only assertion')
+    await page.goto('/track')
+    await page.getByRole('button', { name: /Scan barcode/ }).click()
+
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    const overlay = await page.locator('.track-overlay').boundingBox()
+    const sheet = await page.locator('.track-sheet').boundingBox()
+    expect(overlay).toEqual({ x: 0, y: 0, width: viewport?.width, height: viewport?.height })
+    expect(sheet).toEqual({ x: 0, y: 0, width: viewport?.width, height: viewport?.height })
+    await expect(page.locator('.track-sheet')).toHaveCSS('border-radius', '0px')
+    expect(
+        await page.evaluate(() =>
+            document.querySelector('meta[name="viewport"]')?.getAttribute('content'),
+        ),
+    ).toContain('width=device-width')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewport?.width)
+})
+
 function dateRange(from: string, to: string) {
     const dates: string[] = []
     const current = new Date(`${from}T12:00:00Z`)

@@ -1003,7 +1003,7 @@
 }
 .manual-code {
     display: grid;
-    grid-template-columns: 28px 1fr auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.5rem;
     border-top: 1px solid rgb(255 255 255 / 0.14);
@@ -2020,6 +2020,8 @@
 .track-overlay {
     position: fixed;
     inset: 0;
+    width: 100vw;
+    height: 100dvh;
     z-index: 80;
     display: grid;
     place-items: center;

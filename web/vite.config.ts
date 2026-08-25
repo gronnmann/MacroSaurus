@@ -6,7 +6,7 @@ export default defineConfig({
     plugins: [
         react(),
         VitePWA({
-            registerType: 'prompt',
+            registerType: 'autoUpdate',
             injectRegister: 'auto',
             includeAssets: ['dino-mark-512.png'],
             manifest: {
@@ -27,6 +27,8 @@ export default defineConfig({
                 ],
             },
             workbox: {
+                clientsClaim: true,
+                skipWaiting: true,
                 navigateFallback: '/index.html',
                 navigateFallbackDenylist: [/^\/api\//],
                 runtimeCaching: [{ urlPattern: /\/api\/v1\//, handler: 'NetworkOnly' }],

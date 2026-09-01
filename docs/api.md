@@ -168,6 +168,8 @@ Resolve 1.5 scoops:
 | `PUT` | `/diary-entries/{entryId}` | Edit timing and type-specific values |
 | `POST` | `/diary-entries/{entryId}/copies` | Copy the exact entry to another date/time |
 | `GET` | `/trackables?query={text}&type=ALL&limit=30` | Search foods and recipes together |
+| `GET` | `/trackables/{type}/revisions/{revisionId}/last-amount` | Last valid quantity/unit for a food or recipe |
+| `GET` | `/trackables/suggestions/time-of-day?type=ALL&limit=5` | Habitual items around the user's current local time |
 
 Track 118 g of a food:
 

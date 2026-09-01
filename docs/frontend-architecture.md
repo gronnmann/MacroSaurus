@@ -36,8 +36,10 @@ than primary navigation destinations. Legacy URLs redirect into the new shell.
 Dashboard requests the displayed week as a range and resolves goals for the
 same dates. Its seven-day chart keeps consumption and targets visible together.
 Food Log owns diary mutations and presents entries chronologically rather than
-grouping them into meals. Track owns unified food/recipe search, quick entry,
-weigh-ins, and barcode acquisition; new entries use the current instant.
+grouping them into meals. Track opens on unified food/recipe search, with tabs for
+barcode acquisition, quick entry, and other tracking actions. Blank search also
+shows recent results and time-of-day go-tos derived from diary history; new entries
+use the current instant.
 
 ## Authentication
 

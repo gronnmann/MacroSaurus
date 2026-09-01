@@ -6,7 +6,9 @@ import com.macrosaurus.catalog.FoodCatalog
 import com.macrosaurus.catalog.FoodCreator
 import com.macrosaurus.catalog.FoodDraft
 import com.macrosaurus.catalog.FoodResolver
+import com.macrosaurus.catalog.PortionDraft
 import com.macrosaurus.catalog.SourceKind
+import com.macrosaurus.catalog.application.CatalogService
 import com.macrosaurus.measurements.application.AddWeightCommand
 import com.macrosaurus.measurements.application.MeasurementService
 import com.macrosaurus.recipes.application.RecipeIngredientCommand
@@ -18,6 +20,7 @@ import com.macrosaurus.sharing.application.ShareResourceType
 import com.macrosaurus.sharing.application.SharingService
 import com.macrosaurus.tracking.Meal
 import com.macrosaurus.tracking.application.AddFoodEntryCommand
+import com.macrosaurus.tracking.application.TrackableType
 import com.macrosaurus.tracking.application.TrackingService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -41,6 +44,8 @@ class BackendPersistenceIT {
     @Autowired private lateinit var foodCreator: FoodCreator
 
     @Autowired private lateinit var foodResolver: FoodResolver
+
+    @Autowired private lateinit var catalogService: CatalogService
 
     @Autowired private lateinit var recipes: RecipeService
 
@@ -137,5 +142,66 @@ class BackendPersistenceIT {
 
         val resolved = foodResolver.resolve(userId, food.revisionId, FoodAmount(BigDecimal("25"), "g"))
         assertThat(resolved.nutrients["protein_g"]).isEqualByComparingTo("3.25")
+    }
+
+    @Test
+    fun `tracking defaults and time suggestions follow history across food revisions`() {
+        val userId = "tracking-history-user"
+        val original =
+            foodCreator.create(
+                userId,
+                FoodDraft(
+                    name = "Habit chocolate",
+                    nutrients = mapOf("energy_kcal" to BigDecimal("520")),
+                    portions = listOf(PortionDraft("bar", gramWeight = BigDecimal("30"), default = true)),
+                ),
+            )
+        val now = OffsetDateTime.now().withSecond(0).withNano(0)
+        val firstUse = now.minusDays(3)
+        tracking.addFood(
+            userId,
+            AddFoodEntryCommand(
+                original.revisionId,
+                BigDecimal.ONE,
+                "portion",
+                original.portions.single().id,
+                firstUse.toLocalDate(),
+                firstUse,
+            ),
+        )
+
+        val revised =
+            catalogService.revise(
+                userId,
+                original.id,
+                FoodDraft(
+                    name = "Habit chocolate",
+                    nutrients = mapOf("energy_kcal" to BigDecimal("510")),
+                    portions = listOf(PortionDraft("Bar", gramWeight = BigDecimal("32"), default = true)),
+                ),
+            )
+        val remembered = tracking.lastTrackedAmount(userId, TrackableType.FOOD, revised.revisionId)
+        assertThat(remembered?.quantity).isEqualByComparingTo("1")
+        assertThat(remembered?.unit).isEqualTo("portion")
+        assertThat(remembered?.portionId).isEqualTo(revised.portions.single().id)
+
+        val secondUse = now.minusDays(1)
+        tracking.addFood(
+            userId,
+            AddFoodEntryCommand(
+                revised.revisionId,
+                BigDecimal("2"),
+                "portion",
+                revised.portions.single().id,
+                secondUse.toLocalDate(),
+                secondUse,
+            ),
+        )
+
+        val suggestions = tracking.timeOfDaySuggestions(userId, TrackableType.FOOD, 5)
+        assertThat(suggestions.items.map { it.id }).containsExactly(revised.id)
+        assertThat(tracking.trackables(userId, "", TrackableType.FOOD, 30).first().id).isEqualTo(revised.id)
+        assertThat(tracking.lastTrackedAmount(userId, TrackableType.FOOD, revised.revisionId)?.quantity)
+            .isEqualByComparingTo("2")
     }
 }

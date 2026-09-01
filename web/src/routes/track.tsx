@@ -1,5 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Beef, BookOpen, Camera, ChevronRight, Scale, Search, Utensils, X, Zap } from 'lucide-react'
+import {
+    Beef,
+    BookOpen,
+    Camera,
+    ChevronRight,
+    MoreHorizontal,
+    Scale,
+    Search,
+    Utensils,
+    X,
+    Zap,
+} from 'lucide-react'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -9,13 +20,14 @@ import { formatNumber, kcal, localDate } from '../lib/utils'
 import type { Food, Nutrients, Trackable } from '../types'
 import { ScanExperience } from './scan'
 
-type TrackMode = 'home' | 'search' | 'quick' | 'scan' | 'weight'
+type TrackMode = 'search' | 'scan' | 'quick' | 'more' | 'weight'
+type TopTrackMode = Exclude<TrackMode, 'weight'>
 
 export function TrackPage() {
     const location = useLocation()
     const navigate = useNavigate()
-    const [mode, setMode] = useState<TrackMode>('home')
-    const [scanned, setScanned] = useState<Trackable>()
+    const [mode, setMode] = useState<TrackMode>('search')
+    const [selected, setSelected] = useState<{ item: Trackable; origin: 'search' | 'scan' }>()
     const from = (location.state as { from?: string } | null)?.from || '/dashboard'
     const close = () => navigate(from, { replace: true })
     useEffect(() => {
@@ -42,7 +54,7 @@ export function TrackPage() {
                 <header>
                     <div>
                         <p className="eyebrow">QUICK ACTION</p>
-                        <h1 id="track-title">{trackTitle(mode)}</h1>
+                        <h1 id="track-title">{selected ? 'Choose amount' : trackTitle(mode)}</h1>
                     </div>
                     <button
                         type="button"
@@ -53,56 +65,86 @@ export function TrackPage() {
                         <X />
                     </button>
                 </header>
-                {mode !== 'home' && (
-                    <button type="button" className="sheet-back" onClick={() => setMode('home')}>
-                        ← All tracking options
-                    </button>
+                {selected ? (
+                    <AmountForm
+                        item={selected.item}
+                        backLabel={selected.origin === 'scan' ? 'Scan barcode' : 'Search results'}
+                        onBack={() => setSelected(undefined)}
+                        onDone={close}
+                    />
+                ) : (
+                    <>
+                        {mode !== 'weight' && (
+                            <TrackTabs mode={mode} onMode={(next) => setMode(next)} />
+                        )}
+                        {mode === 'search' && (
+                            <TrackSearch
+                                onSelect={(item) => setSelected({ item, origin: 'search' })}
+                            />
+                        )}
+                        {mode === 'quick' && <QuickEntry onDone={close} />}
+                        {mode === 'scan' && (
+                            <ScanExperience
+                                onFoodReady={(food) =>
+                                    setSelected({ item: trackableFood(food), origin: 'scan' })
+                                }
+                            />
+                        )}
+                        {mode === 'more' && <TrackMore onWeight={() => setMode('weight')} />}
+                        {mode === 'weight' && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="sheet-back"
+                                    onClick={() => setMode('more')}
+                                >
+                                    ← More tracking options
+                                </button>
+                                <WeightEntry onDone={close} />
+                            </>
+                        )}
+                    </>
                 )}
-                {mode === 'home' && <TrackHome onMode={setMode} />}{' '}
-                {mode === 'search' && <TrackSearch onDone={close} />}{' '}
-                {mode === 'quick' && <QuickEntry onDone={close} />}{' '}
-                {mode === 'scan' &&
-                    (scanned ? (
-                        <AmountForm
-                            item={scanned}
-                            onBack={() => setScanned(undefined)}
-                            onDone={close}
-                        />
-                    ) : (
-                        <ScanExperience onFoodReady={(food) => setScanned(trackableFood(food))} />
-                    ))}
-                {mode === 'weight' && <WeightEntry onDone={close} />}
             </section>
         </div>,
         document.body,
     )
 }
 
-function TrackHome({ onMode }: { onMode: (mode: TrackMode) => void }) {
+function TrackTabs({ mode, onMode }: { mode: TopTrackMode; onMode: (mode: TopTrackMode) => void }) {
+    const tabs: Array<{ mode: TopTrackMode; label: string; icon: typeof Search }> = [
+        { mode: 'search', label: 'Search', icon: Search },
+        { mode: 'scan', label: 'Scan', icon: Camera },
+        { mode: 'quick', label: 'Quick Add', icon: Zap },
+        { mode: 'more', label: 'More', icon: MoreHorizontal },
+    ]
+    return (
+        <div className="track-tabs" role="tablist" aria-label="Tracking options">
+            {tabs.map((tab) => {
+                const Icon = tab.icon
+                return (
+                    <button
+                        key={tab.mode}
+                        type="button"
+                        role="tab"
+                        aria-selected={mode === tab.mode}
+                        className={mode === tab.mode ? 'active' : ''}
+                        onClick={() => onMode(tab.mode)}
+                    >
+                        <Icon />
+                        <span>{tab.label}</span>
+                    </button>
+                )
+            })}
+        </div>
+    )
+}
+
+function TrackMore({ onWeight }: { onWeight: () => void }) {
     return (
         <div className="track-home">
-            <button type="button" className="track-home-primary" onClick={() => onMode('search')}>
-                <span>
-                    <Search />
-                </span>
-                <div>
-                    <b>Search foods & recipes</b>
-                    <small>Choose an amount or portion</small>
-                </div>
-                <ChevronRight />
-            </button>
             <div className="track-home-grid">
-                <button type="button" onClick={() => onMode('scan')}>
-                    <Camera />
-                    <b>Scan barcode</b>
-                    <small>Use your camera</small>
-                </button>
-                <button type="button" onClick={() => onMode('quick')}>
-                    <Zap />
-                    <b>Quick track</b>
-                    <small>Macros only</small>
-                </button>
-                <button type="button" onClick={() => onMode('weight')}>
+                <button type="button" onClick={onWeight}>
                     <Scale />
                     <b>Log weight</b>
                     <small>Add a weigh-in now</small>
@@ -122,17 +164,25 @@ function TrackHome({ onMode }: { onMode: (mode: TrackMode) => void }) {
     )
 }
 
-function TrackSearch({ onDone }: { onDone: () => void }) {
+function TrackSearch({ onSelect }: { onSelect: (item: Trackable) => void }) {
     const [query, setQuery] = useState('')
     const [type, setType] = useState('ALL')
-    const [selected, setSelected] = useState<Trackable>()
     const results = useQuery({
         queryKey: queryKeys.trackables(query, type),
         queryFn: () => api.trackables(query, type),
         staleTime: 30_000,
     })
-    if (selected)
-        return <AmountForm item={selected} onBack={() => setSelected(undefined)} onDone={onDone} />
+    const goTos = useQuery({
+        queryKey: queryKeys.timeOfDaySuggestions(type),
+        queryFn: () => api.timeOfDaySuggestions(type),
+        enabled: query.trim() === '',
+        staleTime: 60_000,
+    })
+    const suggestions = query.trim() === '' ? goTos.data?.items || [] : []
+    const suggestedKeys = new Set(suggestions.map((item) => `${item.type}-${item.id}`))
+    const resultItems = (results.data || []).filter(
+        (item) => !suggestedKeys.has(`${item.type}-${item.id}`),
+    )
     return (
         <>
             <label className="search-field track-search">
@@ -167,33 +217,41 @@ function TrackSearch({ onDone }: { onDone: () => void }) {
                     Recipes
                 </button>
             </div>
+            {suggestions.length > 0 && goTos.data && (
+                <section className="track-gotos" aria-labelledby="track-gotos-title">
+                    <h2 id="track-gotos-title">Around {formatAnchorHour(goTos.data.anchorHour)}</h2>
+                    <div>
+                        {suggestions.map((item) => (
+                            <button
+                                type="button"
+                                key={`${item.type}-${item.id}`}
+                                onClick={() => onSelect(item)}
+                            >
+                                <span
+                                    className={`track-result-icon track-result-icon--${item.type.toLowerCase()}`}
+                                >
+                                    {item.type === 'FOOD' ? <Utensils /> : <BookOpen />}
+                                </span>
+                                <b>{item.name}</b>
+                                <small>{item.brand || item.servingLabel}</small>
+                            </button>
+                        ))}
+                    </div>
+                </section>
+            )}
             {results.isLoading ? (
                 <Skeleton lines={5} />
-            ) : results.data?.length ? (
+            ) : resultItems.length ? (
                 <div className="track-results">
-                    {results.data.map((item) => (
-                        <button
-                            type="button"
+                    {resultItems.map((item) => (
+                        <TrackableResult
+                            item={item}
+                            onSelect={onSelect}
                             key={`${item.type}-${item.id}`}
-                            onClick={() => setSelected(item)}
-                        >
-                            <span
-                                className={`track-result-icon track-result-icon--${item.type.toLowerCase()}`}
-                            >
-                                {item.type === 'FOOD' ? <Utensils /> : <BookOpen />}
-                            </span>
-                            <div>
-                                <b>{item.name}</b>
-                                <small>
-                                    {[item.brand, item.servingLabel].filter(Boolean).join(' · ')}
-                                </small>
-                            </div>
-                            <strong>{kcal(item.nutrients)} kcal</strong>
-                            <ChevronRight />
-                        </button>
+                        />
                     ))}
                 </div>
-            ) : (
+            ) : suggestions.length === 0 ? (
                 <StatePanel
                     compact
                     title="No matches"
@@ -209,25 +267,49 @@ function TrackSearch({ onDone }: { onDone: () => void }) {
                         </div>
                     }
                 />
-            )}
+            ) : null}
         </>
+    )
+}
+
+function TrackableResult({
+    item,
+    onSelect,
+}: {
+    item: Trackable
+    onSelect: (item: Trackable) => void
+}) {
+    return (
+        <button type="button" onClick={() => onSelect(item)}>
+            <span className={`track-result-icon track-result-icon--${item.type.toLowerCase()}`}>
+                {item.type === 'FOOD' ? <Utensils /> : <BookOpen />}
+            </span>
+            <div>
+                <b>{item.name}</b>
+                <small>{[item.brand, item.servingLabel].filter(Boolean).join(' · ')}</small>
+            </div>
+            <strong>{kcal(item.nutrients)} kcal</strong>
+            <ChevronRight />
+        </button>
     )
 }
 
 function AmountForm({
     item,
+    backLabel,
     onBack,
     onDone,
 }: {
     item: Trackable
+    backLabel: string
     onBack: () => void
     onDone: () => void
 }) {
     const client = useQueryClient()
     const toast = useToast()
-    const initializedFood = useRef(false)
-    const [foodReady, setFoodReady] = useState(item.type !== 'FOOD')
-    const [quantity, setQuantity] = useState<number | ''>(item.type === 'FOOD' ? 100 : 1)
+    const initialized = useRef(false)
+    const [amountReady, setAmountReady] = useState(false)
+    const [quantity, setQuantity] = useState<number | ''>('')
     const [unit, setUnit] = useState(item.type === 'FOOD' ? 'g' : 'serving')
     const [portionId, setPortionId] = useState('')
     const food = useQuery({
@@ -235,14 +317,29 @@ function AmountForm({
         queryFn: () => api.food(item.id),
         enabled: item.type === 'FOOD',
     })
+    const lastAmount = useQuery({
+        queryKey: queryKeys.lastTrackedAmount(item.type, item.revisionId),
+        queryFn: () => api.lastTrackedAmount(item.type, item.revisionId),
+        staleTime: 30_000,
+    })
     useEffect(() => {
-        if (!food.data || initializedFood.current) return
-        initializedFood.current = true
-        setQuantity(food.data.basisAmount)
-        setUnit(defaultFoodUnit(food.data))
-        setPortionId(food.data.portions.find((portion) => portion.default)?.id || '')
-        setFoodReady(true)
-    }, [food.data])
+        if (initialized.current || lastAmount.isPending || (item.type === 'FOOD' && !food.data))
+            return
+        initialized.current = true
+        if (lastAmount.data) {
+            setQuantity(lastAmount.data.quantity)
+            setUnit(lastAmount.data.unit)
+            setPortionId(lastAmount.data.portionId || '')
+        } else if (food.data) {
+            setQuantity(food.data.basisAmount)
+            setUnit(defaultFoodUnit(food.data))
+            setPortionId(food.data.portions.find((portion) => portion.default)?.id || '')
+        } else {
+            setQuantity(1)
+            setUnit('serving')
+        }
+        setAmountReady(true)
+    }, [food.data, item.type, lastAmount.data, lastAmount.isPending])
     const numericQuantity = Number(quantity)
     const resolved = useQuery({
         queryKey: ['resolved-food', item.revisionId, numericQuantity, unit, portionId],
@@ -254,15 +351,16 @@ function AmountForm({
             }),
         enabled:
             item.type === 'FOOD' &&
-            foodReady &&
+            amountReady &&
             Number.isFinite(numericQuantity) &&
             numericQuantity > 0 &&
             (unit !== 'portion' || Boolean(portionId)),
     })
-    const preview =
-        item.type === 'RECIPE'
-            ? scaleNutrients(item.nutrients, numericQuantity)
-            : resolved.data?.nutrients
+    const preview = !amountReady
+        ? undefined
+        : item.type === 'RECIPE'
+          ? scaleNutrients(item.nutrients, numericQuantity)
+          : resolved.data?.nutrients
     const add = useMutation({
         mutationFn: (payload: unknown) =>
             item.type === 'FOOD' ? api.addFoodEntry(payload) : api.addRecipeEntry(payload),
@@ -300,7 +398,7 @@ function AmountForm({
     return (
         <form className="track-amount" onSubmit={submit}>
             <button type="button" className="sheet-back" onClick={onBack}>
-                ← Search results
+                ← {backLabel}
             </button>
             <div className="selected-trackable">
                 <span className={`track-result-icon track-result-icon--${item.type.toLowerCase()}`}>
@@ -311,7 +409,7 @@ function AmountForm({
                     <p>{item.brand || (item.type === 'RECIPE' ? 'Recipe' : 'Food')}</p>
                 </div>
             </div>
-            <LiveNutrition nutrients={preview} pending={resolved.isFetching} />
+            <LiveNutrition nutrients={preview} pending={!amountReady || resolved.isFetching} />
             <div className="track-amount-entry">
                 <Field label={item.type === 'FOOD' ? 'Amount' : 'Servings'}>
                     <input
@@ -376,7 +474,10 @@ function AmountForm({
                     className="track-add-button"
                     type="submit"
                     disabled={
-                        add.isPending || numericQuantity <= 0 || (item.type === 'FOOD' && !preview)
+                        !amountReady ||
+                        add.isPending ||
+                        numericQuantity <= 0 ||
+                        (item.type === 'FOOD' && !preview)
                     }
                 >
                     {add.isPending ? 'Adding…' : 'Add to Food Log'}
@@ -551,11 +652,16 @@ function WeightEntry({ onDone }: { onDone: () => void }) {
 }
 
 function trackTitle(mode: TrackMode) {
-    if (mode === 'home') return 'What are you tracking?'
     if (mode === 'search') return 'Find food or recipes'
     if (mode === 'quick') return 'Quick track'
     if (mode === 'weight') return 'Log weight'
+    if (mode === 'more') return 'More tracking options'
     return 'Scan a product'
+}
+
+function formatAnchorHour(hour: number) {
+    const value = new Date(2020, 0, 1, hour)
+    return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(value)
 }
 
 const number = (value: FormDataEntryValue | null) => Number(value || 0)

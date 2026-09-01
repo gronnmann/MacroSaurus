@@ -183,6 +183,17 @@ export interface Trackable {
     nutrients: Nutrients
 }
 
+export interface LastTrackedAmount {
+    quantity: number
+    unit: string
+    portionId?: string
+}
+
+export interface TimeOfDaySuggestions {
+    anchorHour: number
+    items: Trackable[]
+}
+
 export type EnergyGoalMode = 'FIXED' | 'MAINTENANCE' | 'KCAL_DELTA' | 'PERCENT_DELTA'
 export type MacroGoalMode = 'GUIDED' | 'CUSTOM_GRAMS' | 'PERCENT_SPLIT'
 export type GoalWeightBasis = 'LATEST_WEIGHT' | 'MANUAL_WEIGHT'

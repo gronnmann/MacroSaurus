@@ -6,8 +6,10 @@ import com.macrosaurus.catalog.FoodCatalog
 import com.macrosaurus.catalog.FoodCreator
 import com.macrosaurus.catalog.FoodDraft
 import com.macrosaurus.catalog.FoodResolver
+import com.macrosaurus.catalog.FoodSnapshot
 import com.macrosaurus.identity.ProfileReader
 import com.macrosaurus.recipes.RecipeReader
+import com.macrosaurus.recipes.RecipeSnapshot
 import com.macrosaurus.shared.InvalidOperationException
 import com.macrosaurus.shared.NotFoundException
 import com.macrosaurus.shared.NutrientMath
@@ -18,6 +20,7 @@ import com.macrosaurus.tracking.DiaryEntryType
 import com.macrosaurus.tracking.Meal
 import com.macrosaurus.tracking.NutritionHistory
 import com.macrosaurus.tracking.persistence.JooqDiaryRepository
+import com.macrosaurus.tracking.persistence.TrackableUse
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
@@ -27,6 +30,7 @@ import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.util.UUID
+import kotlin.math.abs
 
 internal enum class TrackableType { ALL, FOOD, RECIPE }
 
@@ -44,6 +48,17 @@ internal data class Trackable(
     val brand: String?,
     val servingLabel: String,
     val nutrients: Map<String, BigDecimal>,
+)
+
+internal data class LastTrackedAmount(
+    val quantity: BigDecimal,
+    val unit: String,
+    val portionId: UUID?,
+)
+
+internal data class TimeOfDaySuggestions(
+    val anchorHour: Int,
+    val items: List<Trackable>,
 )
 
 internal data class AddFoodEntryCommand(
@@ -348,35 +363,185 @@ internal class TrackingService(
         type: TrackableType,
         limit: Int,
     ): List<Trackable> {
+        val safeLimit = limit.coerceIn(1, 100)
         val foods =
             if (type in setOf(TrackableType.ALL, TrackableType.FOOD)) {
-                catalog.search(userId, query, limit).map { food ->
-                    Trackable(
-                        "FOOD",
-                        food.id,
-                        food.revisionId,
-                        food.name,
-                        food.brand,
-                        food.portions.firstOrNull { it.default }?.name
-                            ?: "${food.basisAmount.stripTrailingZeros().toPlainString()} ${food.basisUnit}",
-                        food.nutrients,
-                    )
-                }
+                catalog.search(userId, query, safeLimit).map(::foodTrackable)
             } else {
                 emptyList()
             }
+        val recipeSnapshots =
+            if (type in setOf(TrackableType.ALL, TrackableType.RECIPE)) recipes.list(userId) else emptyList()
         val recipes =
-            if (type in setOf(TrackableType.ALL, TrackableType.RECIPE)) {
-                recipes
-                    .list(userId)
-                    .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
-                    .map { recipe ->
-                        Trackable("RECIPE", recipe.id, recipe.revisionId, recipe.name, null, "1 serving", recipe.nutrientsPerServing)
-                    }
-            } else {
-                emptyList()
+            recipeSnapshots
+                .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
+                .map(::recipeTrackable)
+
+        val recentUses =
+            repository
+                .findRecentTrackableUses(userId, 100)
+                .filter { type == TrackableType.ALL || it.entryType.name == type.name }
+        val recentTrackables = materializeTrackables(userId, recentUses, recipeSnapshots)
+        val matchingRecent =
+            recentTrackables.values.filter { item ->
+                query.isBlank() ||
+                    item.name.contains(query.trim(), ignoreCase = true) ||
+                    item.brand?.contains(query.trim(), ignoreCase = true) == true
             }
-        return (foods + recipes).sortedBy { it.name.lowercase() }.take(limit.coerceIn(1, 100))
+        val recency = recentUses.associate { TrackableKey(it.entryType.name, it.entityId) to it.createdAt }
+        val merged = linkedMapOf<TrackableKey, Trackable>()
+        (matchingRecent + foods + recipes).forEach { item -> merged.putIfAbsent(TrackableKey(item.type, item.id), item) }
+        return merged.values
+            .sortedWith { left, right ->
+                val leftRecent = recency[TrackableKey(left.type, left.id)]
+                val rightRecent = recency[TrackableKey(right.type, right.id)]
+                when {
+                    leftRecent != null && rightRecent == null -> -1
+                    leftRecent == null && rightRecent != null -> 1
+                    leftRecent != null && rightRecent != null -> rightRecent.compareTo(leftRecent)
+                    else -> left.name.compareTo(right.name, ignoreCase = true)
+                }
+            }.take(safeLimit)
+    }
+
+    fun lastTrackedAmount(
+        userId: String,
+        type: TrackableType,
+        revisionId: UUID,
+    ): LastTrackedAmount? =
+        when (type) {
+            TrackableType.FOOD -> {
+                lastFoodAmount(userId, revisionId)
+            }
+
+            TrackableType.RECIPE -> {
+                recipes.getByRevision(userId, revisionId)
+                repository
+                    .findLatestTrackedAmount(userId, DiaryEntryType.RECIPE, revisionId)
+                    ?.let { LastTrackedAmount(it.quantity, "serving", null) }
+            }
+
+            TrackableType.ALL -> {
+                throw InvalidOperationException("A concrete trackable type is required")
+            }
+        }
+
+    fun timeOfDaySuggestions(
+        userId: String,
+        type: TrackableType,
+        limit: Int,
+    ): TimeOfDaySuggestions {
+        val zone = userZone(userId)
+        val now = OffsetDateTime.now(clock)
+        val localNow = now.atZoneSameInstant(zone)
+        val anchorHour = (localNow.hour + if (localNow.minute >= 30) 1 else 0) % 24
+        val uses =
+            repository
+                .findTrackableUsesSince(userId, now.minusDays(28))
+                .filter { type == TrackableType.ALL || it.entryType.name == type.name }
+                .filter { use ->
+                    val localUse = use.consumedAt.atZoneSameInstant(zone)
+                    circularMinuteDistance(localNow.hour * 60 + localNow.minute, localUse.hour * 60 + localUse.minute) <= 120
+                }
+        val habits =
+            uses
+                .groupBy { TrackableKey(it.entryType.name, it.entityId) }
+                .mapValues { (_, matches) ->
+                    val matchingDays = matches.map { it.consumedAt.atZoneSameInstant(zone).toLocalDate() }.toSet().size
+                    HabitScore(matchingDays, matches.maxOf { it.consumedAt })
+                }.filterValues { it.matchingDays >= 2 }
+        if (habits.isEmpty()) return TimeOfDaySuggestions(anchorHour, emptyList())
+
+        val habitualUses = uses.filter { TrackableKey(it.entryType.name, it.entityId) in habits }
+        val recipeSnapshots =
+            if (type in setOf(TrackableType.ALL, TrackableType.RECIPE)) recipes.list(userId) else emptyList()
+        val items = materializeTrackables(userId, habitualUses, recipeSnapshots)
+        val ranked =
+            items
+                .filterKeys { it in habits }
+                .entries
+                .sortedWith(
+                    compareByDescending<Map.Entry<TrackableKey, Trackable>> { habits.getValue(it.key).matchingDays }
+                        .thenByDescending { habits.getValue(it.key).latestUse }
+                        .thenBy { it.value.name.lowercase() },
+                ).map { it.value }
+                .take(limit.coerceIn(1, 10))
+        return TimeOfDaySuggestions(anchorHour, ranked)
+    }
+
+    private fun lastFoodAmount(
+        userId: String,
+        revisionId: UUID,
+    ): LastTrackedAmount? {
+        val target = catalog.byRevision(userId, revisionId)
+        val latest = repository.findLatestTrackedAmount(userId, DiaryEntryType.FOOD, revisionId) ?: return null
+        val unit = latest.unit.lowercase()
+        val portionId =
+            if (unit == "portion") {
+                target.portions.firstOrNull { it.id == latest.portionId }?.id
+                    ?: latest.portionName?.let { previousName ->
+                        target.portions.firstOrNull { it.name.trim().equals(previousName.trim(), ignoreCase = true) }?.id
+                    }
+                    ?: return null
+            } else {
+                null
+            }
+        return try {
+            foodResolver.resolve(userId, target.revisionId, FoodAmount(latest.quantity, unit, portionId))
+            LastTrackedAmount(latest.quantity, unit, portionId)
+        } catch (_: InvalidOperationException) {
+            null
+        }
+    }
+
+    private fun materializeTrackables(
+        userId: String,
+        uses: List<TrackableUse>,
+        loadedRecipes: List<RecipeSnapshot>,
+    ): Map<TrackableKey, Trackable> {
+        val foodRevisionIds = uses.filter { it.entryType == DiaryEntryType.FOOD }.map { it.currentRevisionId }.distinct()
+        val foods = catalog.byRevisions(userId, foodRevisionIds)
+        val recipesByRevision =
+            (
+                loadedRecipes.ifEmpty {
+                    if (uses.any { it.entryType == DiaryEntryType.RECIPE }) recipes.list(userId) else emptyList()
+                }
+            ).associateBy(RecipeSnapshot::revisionId)
+        return uses
+            .distinctBy { TrackableKey(it.entryType.name, it.entityId) }
+            .mapNotNull { use ->
+                val item =
+                    when (use.entryType) {
+                        DiaryEntryType.FOOD -> foods[use.currentRevisionId]?.let(::foodTrackable)
+                        DiaryEntryType.RECIPE -> recipesByRevision[use.currentRevisionId]?.let(::recipeTrackable)
+                        DiaryEntryType.QUICK -> null
+                    }
+                item?.let { TrackableKey(it.type, it.id) to it }
+            }.toMap()
+    }
+
+    private fun foodTrackable(food: FoodSnapshot) =
+        Trackable(
+            "FOOD",
+            food.id,
+            food.revisionId,
+            food.name,
+            food.brand,
+            food.portions.firstOrNull { it.default }?.name
+                ?: "${food.basisAmount.stripTrailingZeros().toPlainString()} ${food.basisUnit}",
+            food.nutrients,
+        )
+
+    private fun recipeTrackable(recipe: RecipeSnapshot) = Trackable("RECIPE", recipe.id, recipe.revisionId, recipe.name, null, "1 serving", recipe.nutrientsPerServing)
+
+    private fun userZone(userId: String): ZoneId = profiles.get(userId)?.timezone?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.of("UTC")
+
+    private fun circularMinuteDistance(
+        left: Int,
+        right: Int,
+    ): Int {
+        val direct = abs(left - right)
+        return minOf(direct, 24 * 60 - direct)
     }
 
     private fun insert(
@@ -434,5 +599,15 @@ internal class TrackingService(
         val unit: String,
         val portionId: UUID?,
         val nutrients: NutrientValues,
+    )
+
+    private data class TrackableKey(
+        val type: String,
+        val id: UUID,
+    )
+
+    private data class HabitScore(
+        val matchingDays: Int,
+        val latestUse: OffsetDateTime,
     )
 }

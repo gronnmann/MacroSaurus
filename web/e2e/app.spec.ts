@@ -162,6 +162,8 @@ async function mockApi(page: Page) {
                     iron_mg: 8.4,
                 },
             }
+        else if (path === '/api/v1/trackables/suggestions/time-of-day')
+            data = { anchorHour: 11, items: [] }
         else if (path === '/api/v1/trackables')
             data = [
                 {
@@ -174,7 +176,21 @@ async function mockApi(page: Page) {
                     nutrients: banana.nutrients,
                 },
             ]
-        else if (
+        else if (path.endsWith('/last-amount')) data = undefined
+        else if (path === '/api/v1/food-revisions/food-revision-1/resolve') {
+            const input = route.request().postDataJSON()
+            const factor = input.quantity / 100
+            data = {
+                foodRevisionId: banana.revisionId,
+                displayName: banana.name,
+                quantity: input.quantity,
+                unit: input.unit,
+                resolvedGrams: input.quantity,
+                nutrients: Object.fromEntries(
+                    Object.entries(banana.nutrients).map(([code, value]) => [code, value * factor]),
+                ),
+            }
+        } else if (
             path === '/api/v1/foods/food-1' ||
             path === '/api/v1/food-revisions/food-revision-1'
         )
@@ -215,10 +231,11 @@ async function mockApi(page: Page) {
                 activityMultiplier: 1.55,
             }
         else if (path.includes('/copies') || path === '/api/v1/diary-entries/entry-1') data = entry
+        const noContent = method === 'DELETE' || path.endsWith('/last-amount')
         await route.fulfill({
-            status: method === 'DELETE' ? 204 : 200,
+            status: noContent ? 204 : 200,
             contentType: 'application/json',
-            body: method === 'DELETE' ? '' : JSON.stringify(data),
+            body: noContent ? '' : JSON.stringify(data),
         })
     })
 }
@@ -229,7 +246,7 @@ test.beforeEach(async ({ page }) => {
 
 test('dashboard presents the week and consumed or remaining views', async ({ page }, testInfo) => {
     await page.goto(`/dashboard?date=${date}`)
-    await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Monday, August 17' })).toBeVisible()
     await expect(page.locator('.week-chart > button')).toHaveCount(7)
     const weeklyTargets = page.locator('.week-targets')
     await expect(weeklyTargets.getByText('1,840', { exact: true })).toBeVisible()
@@ -247,15 +264,13 @@ test('dashboard presents the week and consumed or remaining views', async ({ pag
 
 test('Track logs at the current time and includes weigh-ins', async ({ page }) => {
     await page.goto('/track')
-    await expect(page.getByRole('button', { name: /Log weight/ })).toBeVisible()
-
-    await page.getByRole('button', { name: /Quick track/ }).click()
+    await page.getByRole('tab', { name: 'Quick Add' }).click()
     await expect(page.getByText('Logged at the current date and time')).toBeVisible()
     await expect(page.getByLabel('Date', { exact: true })).toHaveCount(0)
     await expect(page.getByLabel('Time', { exact: true })).toHaveCount(0)
     await expect(page.getByLabel('Meal', { exact: true })).toHaveCount(0)
 
-    await page.getByRole('button', { name: 'All tracking options' }).click()
+    await page.getByRole('tab', { name: 'More' }).click()
     await page.getByRole('button', { name: /Log weight/ }).click()
     await page.getByLabel('Weight (kg)').fill('81.5')
     await page.getByRole('button', { name: 'Add weigh-in' }).click()
@@ -266,7 +281,6 @@ test('center Track action searches foods and recipes together', async ({ page })
     await page.goto(`/dashboard?date=${date}`)
     await page.getByRole('link', { name: 'Track', exact: true }).first().click()
     await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('button', { name: /Search foods & recipes/ }).click()
     await expect(page.getByPlaceholder('Search foods and recipes…')).toBeVisible()
     await page.getByText('Banana, raw').click()
     await expect(page.getByRole('button', { name: 'Add to Food Log' })).toBeVisible()
@@ -288,7 +302,7 @@ test('Food Log exposes edit, copy, custom date, and delete actions', async ({ pa
 
 test('label photo appears only after an unmatched barcode', async ({ page }) => {
     await page.goto('/track')
-    await page.getByRole('button', { name: /Scan barcode/ }).click()
+    await page.getByRole('tab', { name: 'Scan' }).click()
     await expect(page.getByText('Take one label photo')).toHaveCount(0)
     await page.getByLabel('Enter barcode').fill('3017620422003')
     await page.getByRole('button', { name: 'Look up' }).click()
@@ -299,7 +313,7 @@ test('label photo appears only after an unmatched barcode', async ({ page }) => 
 test('mobile layout has the raised centered Track action', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'mobile-only assertion')
     await page.goto(`/dashboard?date=${date}`)
-    await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Monday, August 17' })).toBeVisible()
     const navigation = page.getByRole('navigation', {
         name: 'Mobile navigation',
     })
@@ -316,7 +330,7 @@ test('mobile layout has the raised centered Track action', async ({ page }, test
 test('mobile tracking surface exactly fills the viewport', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'mobile-only assertion')
     await page.goto('/track')
-    await page.getByRole('button', { name: /Scan barcode/ }).click()
+    await page.getByRole('tab', { name: 'Scan' }).click()
 
     const viewport = page.viewportSize()
     expect(viewport).not.toBeNull()

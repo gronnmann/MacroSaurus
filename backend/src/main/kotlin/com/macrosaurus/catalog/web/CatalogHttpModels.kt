@@ -8,7 +8,6 @@ import com.macrosaurus.catalog.NutrientDefinition
 import com.macrosaurus.catalog.PortionDraft
 import com.macrosaurus.catalog.PortionSnapshot
 import com.macrosaurus.catalog.SourceKind
-import com.macrosaurus.shared.NutrientValues
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.NotBlank
@@ -87,7 +86,7 @@ data class ResolvedFoodAmount(
     val quantity: BigDecimal,
     val unit: String,
     val resolvedGrams: BigDecimal?,
-    val nutrients: NutrientValues,
+    val nutrients: Map<String, BigDecimal>,
 )
 
 internal fun NutrientDefinition.toView() = NutrientDefinitionView(code, displayName, category, unit, sortOrder)
@@ -127,4 +126,4 @@ internal fun CreateFoodRequest.toDraft() =
 
 internal fun FoodAmountRequest.toAmount() = FoodAmount(quantity, unit, portionId)
 
-internal fun ResolvedFoodAmountContract.toView() = ResolvedFoodAmount(foodRevisionId, displayName, quantity, unit, resolvedGrams, nutrients)
+internal fun ResolvedFoodAmountContract.toView() = ResolvedFoodAmount(foodRevisionId, displayName, quantity, unit, resolvedGrams, nutrients.values)

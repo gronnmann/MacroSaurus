@@ -8,7 +8,9 @@ import com.macrosaurus.tracking.application.AddFoodEntryCommand
 import com.macrosaurus.tracking.application.AddRecipeEntryCommand
 import com.macrosaurus.tracking.application.CopyDiaryEntryCommand
 import com.macrosaurus.tracking.application.DiaryDay
+import com.macrosaurus.tracking.application.LastTrackedAmount
 import com.macrosaurus.tracking.application.QuickTrackCommand
+import com.macrosaurus.tracking.application.TimeOfDaySuggestions
 import com.macrosaurus.tracking.application.Trackable
 import com.macrosaurus.tracking.application.TrackableType
 import com.macrosaurus.tracking.application.TrackingService
@@ -16,6 +18,7 @@ import com.macrosaurus.tracking.application.UpdateDiaryEntryCommand
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.NotBlank
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -60,6 +63,17 @@ data class TrackableView(
     val brand: String?,
     val servingLabel: String,
     val nutrients: Map<String, BigDecimal>,
+)
+
+data class LastTrackedAmountView(
+    val quantity: BigDecimal,
+    val unit: String,
+    val portionId: UUID?,
+)
+
+data class TimeOfDaySuggestionsView(
+    val anchorHour: Int,
+    val items: List<TrackableView>,
 )
 
 data class AddFoodEntryRequest(
@@ -126,6 +140,10 @@ private fun DiaryDay.toView() = DiaryDayView(date, entries.map { it.toView() }, 
 
 private fun Trackable.toView() = TrackableView(type, id, revisionId, name, brand, servingLabel, nutrients)
 
+private fun LastTrackedAmount.toView() = LastTrackedAmountView(quantity, unit, portionId)
+
+private fun TimeOfDaySuggestions.toView() = TimeOfDaySuggestionsView(anchorHour, items.map { it.toView() })
+
 private fun QuickTrackResultContract.toView() = QuickTrackResult(entry.toView(), calculatedCalories, calorieDiscrepancy, savedFoodId)
 
 @RestController
@@ -151,6 +169,20 @@ internal class TrackingController(
         @RequestParam(defaultValue = "ALL") type: TrackableType,
         @RequestParam(defaultValue = "30") limit: Int,
     ) = tracking.trackables(users.userId(), query, type, limit).map { it.toView() }
+
+    @GetMapping("/trackables/suggestions/time-of-day")
+    fun timeOfDaySuggestions(
+        @RequestParam(defaultValue = "ALL") type: TrackableType,
+        @RequestParam(defaultValue = "5") limit: Int,
+    ) = tracking.timeOfDaySuggestions(users.userId(), type, limit).toView()
+
+    @GetMapping("/trackables/{type}/revisions/{revisionId}/last-amount")
+    fun lastTrackedAmount(
+        @PathVariable type: TrackableType,
+        @PathVariable revisionId: UUID,
+    ): ResponseEntity<LastTrackedAmountView> =
+        tracking.lastTrackedAmount(users.userId(), type, revisionId)?.let { ResponseEntity.ok(it.toView()) }
+            ?: ResponseEntity.noContent().build()
 
     @PostMapping("/diary-entries/food")
     fun addFood(

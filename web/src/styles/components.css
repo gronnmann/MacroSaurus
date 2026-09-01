@@ -2080,6 +2080,35 @@
     font-weight: 850;
     cursor: pointer;
 }
+.track-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem;
+    margin: 0.8rem 0;
+    border-bottom: 1px solid #d8d2c3;
+}
+.track-tabs button {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.38rem;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    padding: 0.65rem 0.35rem;
+    color: var(--muted);
+    cursor: pointer;
+    font-weight: 800;
+}
+.track-tabs button.active {
+    border-bottom-color: var(--green-950);
+    color: var(--green-950);
+}
+.track-tabs svg {
+    width: 18px;
+    height: 18px;
+}
 .track-home {
     display: grid;
     gap: 0.8rem;
@@ -2155,6 +2184,57 @@
 }
 .segmented.compact {
     width: min(360px, 100%);
+}
+.track-gotos {
+    margin-top: 1rem;
+}
+.track-gotos h2 {
+    margin: 0 0 0.55rem;
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    letter-spacing: 0.01em;
+}
+.track-gotos > div {
+    display: flex;
+    gap: 0.55rem;
+    overflow-x: auto;
+    padding-bottom: 0.35rem;
+    scrollbar-width: none;
+}
+.track-gotos > div::-webkit-scrollbar {
+    display: none;
+}
+.track-gotos button {
+    display: grid;
+    width: 128px;
+    min-width: 128px;
+    min-height: 118px;
+    justify-items: start;
+    gap: 0.24rem;
+    border: 1px solid #d2d9ca;
+    border-radius: 15px;
+    background: #f7fbf4;
+    padding: 0.7rem;
+    cursor: pointer;
+    text-align: left;
+}
+.track-gotos button:hover {
+    border-color: var(--green-500);
+    box-shadow: var(--shadow-sm);
+}
+.track-gotos b,
+.track-gotos small {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+}
+.track-gotos b {
+    -webkit-line-clamp: 2;
+    line-height: 1.1;
+}
+.track-gotos small {
+    color: var(--muted);
+    -webkit-line-clamp: 1;
 }
 .track-results {
     display: grid;

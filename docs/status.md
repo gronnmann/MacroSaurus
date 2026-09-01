@@ -29,6 +29,7 @@ This document separates implemented behavior from architecture planned for later
 - Per-100-g, per-100-ml, and per-serving bases.
 - Named gram/volume portions and density-aware conversions.
 - Daily food/recipe/quick diary entries with nutrient snapshots.
+- Remembered food/recipe amounts and local-time habit suggestions derived from diary history.
 - Full diary entry editing, deletion, and exact copies to another date/time.
 - Unified food and recipe tracking search.
 - Macro-calculated calories and optional explicit calories.

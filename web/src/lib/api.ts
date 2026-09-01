@@ -7,6 +7,7 @@ import type {
     Food,
     FoodInput,
     GoalSettings,
+    LastTrackedAmount,
     NutrientDefinition,
     NutrientTarget,
     ProblemDetails,
@@ -17,6 +18,7 @@ import type {
     ResolvedGoal,
     ScanJob,
     SharedSnapshot,
+    TimeOfDaySuggestions,
     Trackable,
     UpdateDiaryEntryInput,
     Weight,
@@ -113,6 +115,14 @@ export const api = {
         request<Trackable[]>(
             `/trackables?query=${encodeURIComponent(query)}&type=${type}&limit=${limit}`,
         ),
+    lastTrackedAmount: (type: Trackable['type'], revisionId: string) =>
+        request<LastTrackedAmount | undefined>(
+            `/trackables/${type}/revisions/${revisionId}/last-amount`,
+        ),
+    timeOfDaySuggestions: (type = 'ALL', limit = 5) =>
+        request<TimeOfDaySuggestions>(
+            `/trackables/suggestions/time-of-day?type=${type}&limit=${limit}`,
+        ),
     foods: (query = '', limit = 25) =>
         request<Food[]>(`/foods?query=${encodeURIComponent(query)}&limit=${limit}`),
     food: (id: string) => request<Food>(`/foods/${id}`),
@@ -180,6 +190,9 @@ export const queryKeys = {
     diary: (date: string) => ['diary', date] as const,
     foods: (query: string) => ['foods', query] as const,
     trackables: (query: string, type = 'ALL') => ['trackables', query, type] as const,
+    lastTrackedAmount: (type: Trackable['type'], revisionId: string) =>
+        ['last-tracked-amount', type, revisionId] as const,
+    timeOfDaySuggestions: (type: string) => ['time-of-day-suggestions', type] as const,
     food: (id: string) => ['food', id] as const,
     recipes: ['recipes'] as const,
     recipe: (id: string) => ['recipe', id] as const,

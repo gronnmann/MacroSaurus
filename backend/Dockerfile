@@ -15,7 +15,7 @@ RUN apk add --no-cache curl \
     && adduser -S -G macrosaurus macrosaurus
 
 WORKDIR /app
-COPY --from=build /workspace/backend/target/backend-0.1.0-SNAPSHOT.jar app.jar
+COPY --from=build /workspace/backend/target/backend-*.jar app.jar
 
 USER macrosaurus
 EXPOSE 8080

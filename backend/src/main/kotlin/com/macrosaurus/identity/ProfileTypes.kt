@@ -22,3 +22,21 @@ data class ProfileSnapshot(
 fun interface ProfileReader {
     fun get(userId: String): ProfileSnapshot?
 }
+
+data class ProfileUpdate(
+    val displayName: String,
+    val locale: String,
+    val timezone: String,
+    val unitSystem: UnitSystem,
+    val birthDate: LocalDate,
+    val heightCm: BigDecimal,
+    val formulaSex: FormulaSex,
+    val activityMultiplier: BigDecimal,
+)
+
+fun interface ProfileWriter {
+    fun save(
+        userId: String,
+        update: ProfileUpdate,
+    ): ProfileSnapshot
+}

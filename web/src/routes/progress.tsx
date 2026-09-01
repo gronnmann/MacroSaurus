@@ -22,8 +22,8 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatDate, formatNumber } from '../lib/utils'
-import type { Weight } from '../types'
+import { formatDate, formatNumber, today } from '../lib/utils'
+import type { ProgressSeriesPoint, Weight } from '../types'
 
 export function ProgressPage() {
     const client = useQueryClient()
@@ -36,11 +36,17 @@ export function ProgressPage() {
         queryKey: queryKeys.expenditure,
         queryFn: () => api.expenditure(),
     })
+    const range = progressRange()
+    const series = useQuery({
+        queryKey: queryKeys.progressSeries(range.from, range.to),
+        queryFn: () => api.progressSeries(range.from, range.to),
+    })
     const add = useMutation({
         mutationFn: api.addWeight,
         onSuccess: () => {
             client.invalidateQueries({ queryKey: queryKeys.weights })
             client.invalidateQueries({ queryKey: queryKeys.expenditure })
+            client.invalidateQueries({ queryKey: ['progress-series'] })
             toast.push('Weigh-in added')
         },
         onError: (error) => toast.push('Could not add weigh-in', error.message, 'error'),
@@ -50,6 +56,7 @@ export function ProgressPage() {
         onSuccess: () => {
             client.invalidateQueries({ queryKey: queryKeys.weights })
             client.invalidateQueries({ queryKey: queryKeys.expenditure })
+            client.invalidateQueries({ queryKey: ['progress-series'] })
             toast.push('Weigh-in removed')
         },
     })
@@ -90,6 +97,7 @@ export function ProgressPage() {
                     ) : (
                         <>
                             <WeightChart weights={weights.data || []} />
+                            {series.data && <WeightTrendChart points={series.data} />}
                             <form className="weight-form" onSubmit={submit}>
                                 <Field label="Weight (kg)">
                                     <input
@@ -181,6 +189,7 @@ export function ProgressPage() {
                                     <b>{formatNumber(estimate.data?.adaptiveKcal, 'kcal')}</b>
                                 </div>
                             </div>
+                            {series.data && <ExpenditureChart points={series.data} />}
                             <div className="requirement-list">
                                 <Requirement
                                     label="Logged days"
@@ -216,6 +225,134 @@ export function ProgressPage() {
             </div>
         </>
     )
+}
+
+function WeightTrendChart({ points }: { points: ProgressSeriesPoint[] }) {
+    const usable = points.filter((point) => point.expenditure.trendWeightKg != null)
+    if (usable.length < 2) return null
+    const values = usable
+        .flatMap((point) => [
+            point.expenditure.trendWeightLowerKg,
+            point.expenditure.trendWeightUpperKg,
+        ])
+        .filter((value): value is number => value != null)
+    const min = Math.min(...values) - 0.2
+    const max = Math.max(...values) + 0.2
+    const y = (value: number) => 100 - ((value - min) / (max - min || 1)) * 100
+    const x = (index: number) => (index / (usable.length - 1)) * 100
+    const line = usable
+        .map(
+            (point, index) =>
+                `${index ? 'L' : 'M'} ${x(index)} ${y(point.expenditure.trendWeightKg ?? 0)}`,
+        )
+        .join(' ')
+    const band = [
+        ...usable.map(
+            (point, index) =>
+                `${x(index)},${y(point.expenditure.trendWeightUpperKg ?? point.expenditure.trendWeightKg ?? 0)}`,
+        ),
+        ...[...usable]
+            .reverse()
+            .map(
+                (point, reverseIndex) =>
+                    `${x(usable.length - 1 - reverseIndex)},${y(point.expenditure.trendWeightLowerKg ?? point.expenditure.trendWeightKg ?? 0)}`,
+            ),
+    ].join(' ')
+    const latest = usable.at(-1)
+    if (!latest) return null
+    return (
+        <div className="uncertainty-chart">
+            <div className="chart-summary">
+                <span>21-day trend and uncertainty</span>
+                <b>{formatNumber(latest.expenditure.trendWeightKg, 'kg')}</b>
+            </div>
+            <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={`Trend weight ${formatNumber(latest.expenditure.trendWeightKg, 'kilograms')}, likely range ${formatNumber(latest.expenditure.trendWeightLowerKg)} to ${formatNumber(latest.expenditure.trendWeightUpperKg)}`}
+            >
+                <polygon className="chart-band" points={band} />
+                <path className="chart-line" d={line} />
+                {usable.map(
+                    (point, index) =>
+                        point.measuredWeightKg != null && (
+                            <circle
+                                className="chart-measurement"
+                                key={point.date}
+                                cx={x(index)}
+                                cy={y(point.measuredWeightKg)}
+                                r="1.4"
+                            >
+                                <title>
+                                    {point.measuredWeightKg} kg on {point.date}
+                                </title>
+                            </circle>
+                        ),
+                )}
+            </svg>
+        </div>
+    )
+}
+
+function ExpenditureChart({ points }: { points: ProgressSeriesPoint[] }) {
+    const usable = points.filter((point) => point.expenditure.suggestedKcal != null)
+    if (usable.length < 2) return null
+    const values = usable
+        .flatMap((point) => [point.expenditure.lowerKcal, point.expenditure.upperKcal])
+        .filter((value): value is number => value != null)
+    const min = Math.min(...values) - 50
+    const max = Math.max(...values) + 50
+    const y = (value: number) => 100 - ((value - min) / (max - min || 1)) * 100
+    const x = (index: number) => (index / (usable.length - 1)) * 100
+    const line = usable
+        .map(
+            (point, index) =>
+                `${index ? 'L' : 'M'} ${x(index)} ${y(point.expenditure.suggestedKcal ?? 0)}`,
+        )
+        .join(' ')
+    const band = [
+        ...usable.map(
+            (point, index) =>
+                `${x(index)},${y(point.expenditure.upperKcal ?? point.expenditure.suggestedKcal ?? 0)}`,
+        ),
+        ...[...usable]
+            .reverse()
+            .map(
+                (point, reverseIndex) =>
+                    `${x(usable.length - 1 - reverseIndex)},${y(point.expenditure.lowerKcal ?? point.expenditure.suggestedKcal ?? 0)}`,
+            ),
+    ].join(' ')
+    const latest = usable.at(-1)
+    if (!latest) return null
+    return (
+        <div className="uncertainty-chart uncertainty-chart--energy">
+            <div className="chart-summary">
+                <span>90-day expenditure model</span>
+                <b>{formatNumber(latest.expenditure.suggestedKcal, 'kcal')}</b>
+            </div>
+            <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={`Estimated expenditure ${formatNumber(latest.expenditure.suggestedKcal, 'calories')}, likely range ${formatNumber(latest.expenditure.lowerKcal)} to ${formatNumber(latest.expenditure.upperKcal)}`}
+            >
+                <polygon className="chart-band" points={band} />
+                <path className="chart-line" d={line} />
+            </svg>
+            <small>
+                {latest.expenditure.modelState.toLowerCase()} ·{' '}
+                {latest.expenditure.confidence.toLowerCase()} confidence
+            </small>
+        </div>
+    )
+}
+
+function progressRange() {
+    const end = new Date(`${today()}T12:00:00`)
+    const start = new Date(end)
+    start.setDate(start.getDate() - 89)
+    return { from: start.toISOString().slice(0, 10), to: today() }
 }
 
 function Requirement({

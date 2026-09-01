@@ -4,6 +4,8 @@ import com.macrosaurus.shared.CurrentUser
 import com.macrosaurus.tracking.DiaryEntrySnapshot
 import com.macrosaurus.tracking.DiaryEntryType
 import com.macrosaurus.tracking.Meal
+import com.macrosaurus.tracking.NutritionDayReview
+import com.macrosaurus.tracking.NutritionDayStatus
 import com.macrosaurus.tracking.application.AddFoodEntryCommand
 import com.macrosaurus.tracking.application.AddRecipeEntryCommand
 import com.macrosaurus.tracking.application.CopyDiaryEntryCommand
@@ -127,6 +129,11 @@ data class CopyDiaryEntryRequest(
     val destinationTime: LocalTime? = null,
 )
 
+data class ReviewNutritionDayRequest(
+    val status: NutritionDayStatus,
+    @field:DecimalMin("0") val estimatedTotalKcal: BigDecimal? = null,
+)
+
 data class QuickTrackResult(
     val entry: DiaryEntryView,
     val calculatedCalories: BigDecimal,
@@ -162,6 +169,12 @@ internal class TrackingController(
         @RequestParam from: LocalDate,
         @RequestParam to: LocalDate,
     ) = tracking.summary(users.userId(), from, to).map { it.toView() }
+
+    @PutMapping("/diary-days/{date}/analysis")
+    fun reviewDay(
+        @PathVariable date: LocalDate,
+        @Valid @RequestBody request: ReviewNutritionDayRequest,
+    ) = tracking.saveReview(users.userId(), NutritionDayReview(date, request.status, request.estimatedTotalKcal))
 
     @GetMapping("/trackables")
     fun trackables(

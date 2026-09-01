@@ -3,6 +3,8 @@ package com.macrosaurus.identity.application
 import com.macrosaurus.identity.FormulaSex
 import com.macrosaurus.identity.ProfileReader
 import com.macrosaurus.identity.ProfileSnapshot
+import com.macrosaurus.identity.ProfileUpdate
+import com.macrosaurus.identity.ProfileWriter
 import com.macrosaurus.identity.UnitSystem
 import com.macrosaurus.identity.persistence.JooqProfileRepository
 import com.macrosaurus.shared.InvalidOperationException
@@ -28,7 +30,8 @@ internal data class UpdateProfileCommand(
 internal class ProfileService(
     private val repository: JooqProfileRepository,
     private val clock: Clock,
-) : ProfileReader {
+) : ProfileReader,
+    ProfileWriter {
     override fun get(userId: String): ProfileSnapshot? = repository.get(userId)
 
     fun upsert(
@@ -51,6 +54,24 @@ internal class ProfileService(
         )
         return requireNotNull(get(userId))
     }
+
+    override fun save(
+        userId: String,
+        update: ProfileUpdate,
+    ): ProfileSnapshot =
+        upsert(
+            userId,
+            UpdateProfileCommand(
+                update.displayName,
+                update.locale,
+                update.timezone,
+                update.unitSystem,
+                update.birthDate,
+                update.heightCm,
+                update.formulaSex,
+                update.activityMultiplier,
+            ),
+        )
 
     private fun validate(command: UpdateProfileCommand) {
         runCatching { ZoneId.of(command.timezone) }

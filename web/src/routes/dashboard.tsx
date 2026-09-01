@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, ChevronLeft, ChevronRight, Flame, Utensils } from 'lucide-react'
+import { ArrowRight, CalendarCheck, ChevronLeft, ChevronRight, Flame, Utensils } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { NutrientFacts, Progress } from '../components/nutrition'
@@ -44,6 +44,7 @@ export function DashboardPage() {
         queryKey: queryKeys.nutrients,
         queryFn: api.nutrients,
     })
+    const coaching = useQuery({ queryKey: queryKeys.coachingStatus, queryFn: api.coachingStatus })
     const day = days.data?.find((item) => item.date === selected)
     const goal = goals.data?.find((item) => item.date === selected)
     const targetMap = resolvedTargetMap(goal, targets.data)
@@ -71,6 +72,20 @@ export function DashboardPage() {
                     </div>
                 }
             />
+            {coaching.data?.checkInDue && (
+                <Card className="checkin-callout" tone="orange">
+                    <CalendarCheck />
+                    <div>
+                        <b>Your Monday check-in is ready</b>
+                        <span>
+                            Review last week’s data and decide whether to update your targets.
+                        </span>
+                    </div>
+                    <Link className="button button--primary" to="/check-in">
+                        Check in <ArrowRight />
+                    </Link>
+                </Card>
+            )}
             {days.isLoading || goals.isLoading ? (
                 <Skeleton lines={6} />
             ) : days.error || goals.error ? (

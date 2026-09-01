@@ -101,6 +101,31 @@ async function mockApi(page: Page) {
         const to = url.searchParams.get('to') ?? date
         let data: unknown = {}
         if (path === '/api/v1/nutrients') data = nutrients
+        else if (path === '/api/v1/me/coaching/status')
+            data = {
+                setupComplete: true,
+                goal: {
+                    id: 'goal-1',
+                    type: 'MAINTAIN',
+                    startingWeightKg: 80,
+                    weeklyRatePercent: 0,
+                    status: 'ACTIVE',
+                    startedOn: date,
+                },
+                program: {
+                    id: 'program-1',
+                    goalId: 'goal-1',
+                    style: 'COACHED',
+                    effectiveFrom: date,
+                    energyKcal: 2200,
+                    proteinG: 165,
+                    carbohydrateG: 240,
+                    fatG: 70,
+                    source: 'ONBOARDING',
+                },
+                nextCheckInDate: '2026-08-24',
+                checkInDue: false,
+            }
         else if (path === '/api/v1/me/targets')
             data = nutrients.map((item) => ({
                 nutrientCode: item.code,
@@ -212,9 +237,12 @@ async function mockApi(page: Page) {
                 baselineKcal: 2380,
                 adaptiveKcal: null,
                 suggestedKcal: 2380,
+                lowerKcal: 1900,
+                upperKcal: 2860,
                 confidence: 'LOW',
                 adaptiveEligible: false,
-                algorithmVersion: 'energy-v1',
+                algorithmVersion: 'energy-v2',
+                modelState: 'BASELINE',
                 explanation: ['Add more logged days to improve this estimate.'],
                 requirements: { loggedDays: 3, weighIns: 1, weightSpanDays: 0 },
             }

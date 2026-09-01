@@ -1,6 +1,7 @@
 package com.macrosaurus.expenditure.web
 
 import com.macrosaurus.expenditure.EnergyEstimate
+import com.macrosaurus.expenditure.ProgressSeriesPoint
 import com.macrosaurus.expenditure.application.ExpenditureService
 import com.macrosaurus.shared.CurrentUser
 import org.springframework.web.bind.annotation.GetMapping
@@ -20,9 +21,40 @@ data class EnergyEstimateView(
     val algorithmVersion: String,
     val explanation: List<String>,
     val requirements: Map<String, Int>,
+    val lowerKcal: BigDecimal?,
+    val upperKcal: BigDecimal?,
+    val trendWeightKg: BigDecimal?,
+    val trendWeightLowerKg: BigDecimal?,
+    val trendWeightUpperKg: BigDecimal?,
+    val modelState: String,
 )
 
-private fun EnergyEstimate.toView() = EnergyEstimateView(date, baselineKcal, adaptiveKcal, suggestedKcal, confidence, adaptiveEligible, algorithmVersion, explanation, requirements)
+data class ProgressSeriesPointView(
+    val date: LocalDate,
+    val measuredWeightKg: BigDecimal?,
+    val expenditure: EnergyEstimateView,
+)
+
+private fun EnergyEstimate.toView() =
+    EnergyEstimateView(
+        date,
+        baselineKcal,
+        adaptiveKcal,
+        suggestedKcal,
+        confidence,
+        adaptiveEligible,
+        algorithmVersion,
+        explanation,
+        requirements,
+        lowerKcal,
+        upperKcal,
+        trendWeightKg,
+        trendWeightLowerKg,
+        trendWeightUpperKg,
+        modelState,
+    )
+
+private fun ProgressSeriesPoint.toView() = ProgressSeriesPointView(date, measuredWeightKg, estimate.toView())
 
 @RestController
 @RequestMapping("/api/v1/expenditure-estimates")
@@ -38,4 +70,10 @@ internal class ExpenditureController(
         date?.let { expenditure.estimate(users.userId(), it, persist) }
             ?: expenditure.current(users.userId(), persist)
     ).toView()
+
+    @GetMapping("/series")
+    fun series(
+        @RequestParam from: LocalDate,
+        @RequestParam to: LocalDate,
+    ) = expenditure.series(users.userId(), from, to).map { it.toView() }
 }

@@ -2,6 +2,7 @@ package com.macrosaurus.goals.application
 
 import com.macrosaurus.expenditure.ExpenditureEstimator
 import com.macrosaurus.goals.persistence.JooqGoalRepository
+import com.macrosaurus.goals.persistence.JooqStrategyRepository
 import com.macrosaurus.measurements.WeightHistory
 import com.macrosaurus.shared.InvalidOperationException
 import org.springframework.stereotype.Service
@@ -60,10 +61,30 @@ internal data class ResolvedGoal(
 @Service
 internal class GoalService(
     private val repository: JooqGoalRepository,
+    private val strategy: JooqStrategyRepository,
     private val expenditure: ExpenditureEstimator,
     private val measurements: WeightHistory,
 ) {
-    fun get(userId: String): GoalSettings = repository.get(userId) ?: GoalSettings(false, null, null, null, null, null, null, null, null, null, null, null, null)
+    fun get(userId: String): GoalSettings =
+        repository.get(userId)
+            ?: strategy.activeProgram(userId)?.let { program ->
+                GoalSettings(
+                    configured = program.energyKcal != null,
+                    energyMode = EnergyGoalMode.FIXED,
+                    energyValue = program.energyKcal,
+                    macroMode = MacroGoalMode.CUSTOM_GRAMS,
+                    proteinGPerKg = program.proteinGPerKg,
+                    fatEnergyPercent = program.fatEnergyPercent,
+                    weightBasis = GoalWeightBasis.LATEST_WEIGHT,
+                    manualWeightKg = null,
+                    proteinTargetG = program.proteinG,
+                    carbohydrateTargetG = program.carbohydrateG,
+                    fatTargetG = program.fatG,
+                    proteinEnergyPercent = null,
+                    carbohydrateEnergyPercent = null,
+                )
+            }
+            ?: GoalSettings(false, null, null, null, null, null, null, null, null, null, null, null, null)
 
     fun save(
         userId: String,
@@ -93,6 +114,19 @@ internal class GoalService(
         date: LocalDate,
         settings: GoalSettings,
     ): ResolvedGoal {
+        val program = strategy.programForDate(userId, date)
+        if (program?.energyKcal != null) {
+            return ResolvedGoal(
+                date,
+                program.energyKcal,
+                program.proteinG,
+                program.carbohydrateG,
+                program.fatG,
+                program.expenditureKcal,
+                EnergyGoalMode.FIXED,
+                emptyList(),
+            )
+        }
         if (!settings.configured) return ResolvedGoal(date, null, null, null, null, null, null, emptyList())
         val warnings = mutableListOf<String>()
         val estimate = expenditure.estimate(userId, date)

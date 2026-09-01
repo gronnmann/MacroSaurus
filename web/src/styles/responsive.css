@@ -169,6 +169,48 @@
     .weight-form .button {
         grid-column: 1 / -1;
     }
+    .setup-progress b {
+        display: none;
+    }
+    .setup-page {
+        padding: 0.8rem;
+    }
+    .setup-page > header {
+        margin-bottom: 1rem;
+    }
+    .setup-page > header .brand small {
+        display: none;
+    }
+    .choice-grid,
+    .choice-grid--two {
+        grid-template-columns: 1fr;
+    }
+    .choice-grid button {
+        min-height: 96px;
+    }
+    .setup-title > span {
+        width: 44px;
+        height: 44px;
+    }
+    .review-day,
+    .review-day.reviewed {
+        grid-template-columns: 1fr;
+    }
+    .review-actions {
+        justify-content: flex-start;
+    }
+    .review-actions label {
+        flex-wrap: wrap;
+    }
+    .checkin-callout {
+        grid-template-columns: auto 1fr;
+    }
+    .checkin-callout .button {
+        grid-column: 1 / -1;
+    }
+    .strategy-summary {
+        grid-template-columns: repeat(2, 1fr);
+    }
     .target-row {
         grid-template-columns: 42px 1fr auto;
     }

@@ -25,14 +25,18 @@
 
 Macrosaurus is an installable nutrition-tracking web app backed by a versioned
 JSON API. It combines a fast daily workflow with complete macro- and
-micronutrient data, flexible portions, recipes, weigh-ins, and calorie-needs
-estimates.
+micronutrient data, flexible portions, recipes, weigh-ins, and adaptive weekly
+nutrition coaching.
 
 | Track | Build | Understand |
 |---|---|---|
 | Foods, recipes, quick macros | Custom foods and named portions | Daily and weekly nutrition |
 | Grams, millilitres, servings | Shareable recipes | Weight trends |
-| Browser-decoded EAN/UPC barcodes | Single-photo label review | Estimated calorie needs |
+| Browser-decoded EAN/UPC barcodes | Single-photo label review | Adaptive calorie needs and weight trends |
+
+New users complete a guided goal and program setup. Every Monday, Macrosaurus can
+review incomplete logs, learn from weigh-ins and intake, show uncertainty, and
+propose the next target revision for the user to accept or skip.
 
 The main app stays intentionally small:
 

@@ -51,6 +51,12 @@ const ProfilePage = lazy(() =>
         default: module.ProfilePage,
     })),
 )
+const SetupPage = lazy(() =>
+    import('./routes/setup').then((module) => ({ default: module.SetupPage })),
+)
+const CheckInPage = lazy(() =>
+    import('./routes/check-in').then((module) => ({ default: module.CheckInPage })),
+)
 const SharedPage = lazy(() =>
     import('./routes/shared').then((module) => ({ default: module.SharedPage })),
 )
@@ -108,6 +114,8 @@ export const router = createBrowserRouter([
             { path: '/scan', element: <Navigate to="/track" replace /> },
             { path: '/scan/:id', element: screen(<ScanReviewPage />) },
             { path: '/progress', element: screen(<ProgressPage />) },
+            { path: '/setup', element: screen(<SetupPage />) },
+            { path: '/check-in', element: screen(<CheckInPage />) },
             {
                 path: '/goals',
                 element: <Navigate to="/profile#nutrition-goals" replace />,

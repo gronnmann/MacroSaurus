@@ -10,94 +10,210 @@ import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.Period
 import java.time.temporal.ChronoUnit
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.sqrt
 
 internal object EnergyCalculator {
+    private const val WINDOW_DAYS = 21L
+    private const val ENERGY_DENSITY_KCAL_PER_KG = 7700.0
+
     fun calculate(
         date: LocalDate,
         profile: ProfileSnapshot?,
         weights: List<WeightMeasurement>,
         diary: List<DailyNutrition>,
     ): EnergyEstimate {
-        val latest = weights.firstOrNull()
-        val explanation = mutableListOf<String>()
+        val start = date.minusDays(WINDOW_DAYS - 1)
+        val dailyWeights =
+            weights
+                .filter { !it.measuredAt.toLocalDate().isBefore(start) && !it.measuredAt.toLocalDate().isAfter(date) }
+                .groupBy { it.measuredAt.toLocalDate() }
+                .mapValues { (_, entries) -> median(entries.map { it.weightKg.toDouble() }) }
+                .toSortedMap()
+        val latestWeight = weights.filter { !it.measuredAt.toLocalDate().isAfter(date) }.maxByOrNull { it.measuredAt }?.weightKg
         val age = profile?.birthDate?.let { Period.between(it, date).years }
-        val baseline =
-            if (profile?.heightCm != null && profile.formulaSex != null && age != null && age >= 18 && latest != null) {
-                val sexAdjustment =
-                    when (profile.formulaSex) {
-                        FormulaSex.MALE -> BigDecimal("5")
-                        FormulaSex.FEMALE -> BigDecimal("-161")
-                    }
-                BigDecimal("10")
-                    .multiply(latest.weightKg)
-                    .add(BigDecimal("6.25").multiply(profile.heightCm))
-                    .subtract(BigDecimal("5").multiply(BigDecimal(age)))
-                    .add(sexAdjustment)
-                    .multiply(profile.activityMultiplier)
-                    .setScale(2, RoundingMode.HALF_UP)
+        val resting =
+            if (profile?.heightCm != null && profile.formulaSex != null && age != null && age >= 18 && latestWeight != null) {
+                10.0 * latestWeight.toDouble() + 6.25 * profile.heightCm.toDouble() - 5.0 * age +
+                    if (profile.formulaSex == FormulaSex.MALE) 5.0 else -161.0
             } else {
                 null
             }
-        explanation +=
-            if (baseline == null) {
-                "Add adult birth date, height, formula sex, and a weigh-in to calculate the baseline."
+        val baseline = resting?.times(profile!!.activityMultiplier.toDouble())
+        val weightedIntakes =
+            diary
+                .filter { !it.date.isBefore(start) && !it.date.isAfter(date) }
+                .mapNotNull { day ->
+                    val energy = day.analysisEnergyKcal?.toDouble() ?: return@mapNotNull null
+                    val weight = day.analysisWeight.toDouble()
+                    if (weight <= 0.0) null else WeightedValue(energy, weight)
+                }
+        val effectiveDays = weightedIntakes.sumOf { it.weight }
+        val spanDays = if (dailyWeights.size >= 2) ChronoUnit.DAYS.between(dailyWeights.firstKey(), dailyWeights.lastKey()).toInt() else 0
+        val recentWeight = dailyWeights.keys.any { !it.isBefore(date.minusDays(6)) }
+        val regression = robustRegression(dailyWeights, start)
+        val eligible = baseline != null && effectiveDays >= 14.0 && dailyWeights.size >= 4 && spanDays >= 14 && recentWeight && regression != null
+        val intake = weightedMean(weightedIntakes)
+        val adaptive =
+            if (regression != null && intake != null && effectiveDays >= 4.0) {
+                intake.mean - ENERGY_DENSITY_KCAL_PER_KG * regression.slope
             } else {
-                "Baseline uses Mifflin-St Jeor and your selected activity multiplier."
+                null
             }
 
-        val start = date.minusDays(20)
-        val loggedDays = diary.filter { it.entryCount > 0 }
-        val relevantWeights = weights.filter { !it.measuredAt.toLocalDate().isBefore(start) }.sortedBy { it.measuredAt }
-        val spanDays =
-            if (relevantWeights.size >= 2) {
-                ChronoUnit.DAYS
-                    .between(relevantWeights.first().measuredAt.toLocalDate(), relevantWeights.last().measuredAt.toLocalDate())
-                    .toInt()
-            } else {
-                0
+        val estimate: Double?
+        val standardError: Double?
+        if (eligible && adaptive != null && intake != null) {
+            val adaptiveSe =
+                max(
+                    100.0,
+                    sqrt(intake.standardError * intake.standardError + square(ENERGY_DENSITY_KCAL_PER_KG * regression.slopeStandardError)),
+                )
+            val baselineVariance = square(max(100.0, baseline * 0.20))
+            val adaptiveVariance = square(adaptiveSe)
+            estimate = (baseline / baselineVariance + adaptive / adaptiveVariance) / (1.0 / baselineVariance + 1.0 / adaptiveVariance)
+            standardError = sqrt(1.0 / (1.0 / baselineVariance + 1.0 / adaptiveVariance))
+        } else {
+            estimate = baseline
+            standardError = baseline?.let { max(100.0, it * 0.20) }
+        }
+        val halfWidth = standardError?.times(1.96)
+        val trend = regression?.predict(ChronoUnit.DAYS.between(start, date).toDouble())
+        val trendHalfWidth = regression?.predictionStandardError?.let { max(0.10, it * 1.96) }
+        val modelState =
+            when {
+                eligible -> "UPDATING"
+                baseline == null -> "INSUFFICIENT"
+                (effectiveDays >= 14.0 || dailyWeights.size >= 4) && !recentWeight -> "HOLDING"
+                else -> "BASELINE"
             }
-        val eligible = baseline != null && loggedDays.size >= 14 && relevantWeights.size >= 4 && spanDays >= 14
-        val adaptive =
-            if (eligible) {
-                val averageIntake =
-                    loggedDays
-                        .mapNotNull { it.totals["energy_kcal"] }
-                        .fold(BigDecimal.ZERO, BigDecimal::add)
-                        .divide(BigDecimal(loggedDays.size), 8, RoundingMode.HALF_UP)
-                val weightDelta = relevantWeights.last().weightKg.subtract(relevantWeights.first().weightKg)
-                val dailyStoredEnergy =
-                    weightDelta.multiply(BigDecimal("7700")).divide(BigDecimal(spanDays), 8, RoundingMode.HALF_UP)
-                averageIntake.subtract(dailyStoredEnergy).setScale(2, RoundingMode.HALF_UP)
-            } else {
-                null
+        val confidence =
+            when {
+                estimate == null -> "INSUFFICIENT"
+                !eligible -> "LOW"
+                effectiveDays >= 18.0 && dailyWeights.size >= 7 && halfWidth != null && halfWidth <= estimate * 0.10 -> "HIGH"
+                else -> "MEDIUM"
             }
-        val suggested = adaptive?.let { clamp(it, baseline!! * BigDecimal("0.90"), baseline * BigDecimal("1.10")) } ?: baseline
-        explanation +=
-            if (eligible) {
-                "Adaptive estimate uses average intake on logged days and the measured weight trend; it is clamped to 10% around baseline."
-            } else {
-                "Adaptive estimates require 14 logged days and 4 weigh-ins spanning at least 14 days."
+        val explanation =
+            buildList {
+                if (baseline == null) {
+                    add("Add adult birth date, height, formula sex, and a weigh-in to calculate the starting estimate.")
+                } else {
+                    add("The starting estimate uses Mifflin-St Jeor and your selected activity level.")
+                }
+                if (eligible) {
+                    add("The adaptive estimate combines reviewed intake with a robust 21-day weight trend.")
+                } else if (modelState == "HOLDING") {
+                    add("The adaptive estimate is holding until there is a recent weigh-in and enough reviewed nutrition data.")
+                } else {
+                    add("Adaptive estimates need 14 reviewed nutrition days and four weigh-in days spanning at least 14 days.")
+                }
+                add("The shaded range describes model uncertainty, not a guaranteed calorie requirement.")
             }
         return EnergyEstimate(
-            date,
-            baseline,
-            adaptive,
-            suggested,
-            when {
-                eligible && loggedDays.size >= 18 -> "MEDIUM"
-                baseline != null -> "LOW"
-                else -> "INSUFFICIENT"
-            },
-            eligible,
-            "energy-v1",
-            explanation,
-            mapOf("loggedDays" to loggedDays.size, "weighIns" to relevantWeights.size, "weightSpanDays" to spanDays),
+            date = date,
+            baselineKcal = decimal(baseline),
+            adaptiveKcal = decimal(adaptive),
+            suggestedKcal = decimal(estimate),
+            confidence = confidence,
+            adaptiveEligible = eligible,
+            algorithmVersion = "energy-v2",
+            explanation = explanation,
+            requirements =
+                mapOf(
+                    "loggedDays" to weightedIntakes.count { it.weight == 1.0 },
+                    "estimatedDays" to weightedIntakes.count { it.weight < 1.0 },
+                    "effectiveDays" to effectiveDays.toInt(),
+                    "weighIns" to dailyWeights.size,
+                    "weightSpanDays" to spanDays,
+                ),
+            lowerKcal = decimal(estimate?.let { value -> halfWidth?.let { value - it } }),
+            upperKcal = decimal(estimate?.let { value -> halfWidth?.let { value + it } }),
+            trendWeightKg = decimal(trend, 3),
+            trendWeightLowerKg = decimal(trend?.let { value -> trendHalfWidth?.let { value - it } }, 3),
+            trendWeightUpperKg = decimal(trend?.let { value -> trendHalfWidth?.let { value + it } }, 3),
+            modelState = modelState,
         )
     }
 
-    private fun clamp(
-        value: BigDecimal,
-        min: BigDecimal,
-        max: BigDecimal,
-    ): BigDecimal = value.max(min).min(max).setScale(2, RoundingMode.HALF_UP)
+    private fun robustRegression(
+        values: Map<LocalDate, Double>,
+        start: LocalDate,
+    ): Regression? {
+        if (values.size < 2) return null
+        val points = values.map { (date, value) -> Point(ChronoUnit.DAYS.between(start, date).toDouble(), value) }
+        var weights = DoubleArray(points.size) { 1.0 }
+        var fit = fit(points, weights) ?: return null
+        repeat(3) {
+            val residuals = points.map { point -> abs(point.y - fit.predict(point.x)) }
+            val scale = max(0.001, 1.4826 * median(residuals))
+            val threshold = 1.345 * scale
+            weights = DoubleArray(points.size) { index -> if (residuals[index] <= threshold) 1.0 else threshold / residuals[index] }
+            fit = fit(points, weights) ?: fit
+        }
+        return fit
+    }
+
+    private fun fit(
+        points: List<Point>,
+        weights: DoubleArray,
+    ): Regression? {
+        val sumW = weights.sum()
+        val meanX = points.indices.sumOf { weights[it] * points[it].x } / sumW
+        val meanY = points.indices.sumOf { weights[it] * points[it].y } / sumW
+        val denominator = points.indices.sumOf { weights[it] * square(points[it].x - meanX) }
+        if (denominator == 0.0) return null
+        val slope = points.indices.sumOf { weights[it] * (points[it].x - meanX) * (points[it].y - meanY) } / denominator
+        val intercept = meanY - slope * meanX
+        val residualVariance =
+            points.indices.sumOf { weights[it] * square(points[it].y - (intercept + slope * points[it].x)) } /
+                max(1.0, sumW - 2.0)
+        return Regression(intercept, slope, sqrt(residualVariance / denominator), sqrt(residualVariance))
+    }
+
+    private fun weightedMean(values: List<WeightedValue>): Mean? {
+        if (values.isEmpty()) return null
+        val totalWeight = values.sumOf { it.weight }
+        val mean = values.sumOf { it.value * it.weight } / totalWeight
+        val variance = values.sumOf { it.weight * square(it.value - mean) } / max(1.0, totalWeight - 1.0)
+        return Mean(mean, sqrt(variance / totalWeight))
+    }
+
+    private fun median(values: List<Double>): Double {
+        val sorted = values.sorted()
+        val middle = sorted.size / 2
+        return if (sorted.size % 2 == 0) (sorted[middle - 1] + sorted[middle]) / 2.0 else sorted[middle]
+    }
+
+    private fun square(value: Double) = value * value
+
+    private fun decimal(
+        value: Double?,
+        scale: Int = 2,
+    ): BigDecimal? = value?.takeIf { it.isFinite() }?.let { BigDecimal.valueOf(it).setScale(scale, RoundingMode.HALF_UP) }
+
+    private data class WeightedValue(
+        val value: Double,
+        val weight: Double,
+    )
+
+    private data class Mean(
+        val mean: Double,
+        val standardError: Double,
+    )
+
+    private data class Point(
+        val x: Double,
+        val y: Double,
+    )
+
+    private data class Regression(
+        val intercept: Double,
+        val slope: Double,
+        val slopeStandardError: Double,
+        val predictionStandardError: Double,
+    ) {
+        fun predict(x: Double) = intercept + slope * x
+    }
 }

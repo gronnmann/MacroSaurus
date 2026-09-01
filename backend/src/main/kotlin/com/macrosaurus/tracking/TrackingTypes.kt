@@ -27,7 +27,39 @@ data class DailyNutrition(
     val date: LocalDate,
     val entryCount: Int,
     val totals: Map<String, BigDecimal>,
+    val analysisStatus: NutritionDayStatus = NutritionDayStatus.LOGGED,
+    val analysisEnergyKcal: BigDecimal? = totals["energy_kcal"],
+    val analysisWeight: BigDecimal = BigDecimal.ONE,
 )
+
+enum class NutritionDayStatus { LOGGED, CONFIRMED_COMPLETE, ESTIMATED_TOTAL, EXCLUDED, FASTING, MISSING }
+
+data class NutritionDayReview(
+    val date: LocalDate,
+    val status: NutritionDayStatus,
+    val estimatedTotalKcal: BigDecimal?,
+)
+
+data class NutritionReviewCandidate(
+    val date: LocalDate,
+    val loggedEnergyKcal: BigDecimal?,
+    val entryCount: Int,
+    val reason: String,
+    val review: NutritionDayReview?,
+)
+
+interface NutritionDayReviewer {
+    fun saveReview(
+        userId: String,
+        review: NutritionDayReview,
+    ): NutritionDayReview
+
+    fun candidates(
+        userId: String,
+        from: LocalDate,
+        to: LocalDate,
+    ): List<NutritionReviewCandidate>
+}
 
 fun interface NutritionHistory {
     fun dailyNutrition(

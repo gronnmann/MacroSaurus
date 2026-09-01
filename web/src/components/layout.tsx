@@ -1,4 +1,5 @@
 import { useRegisterSW } from 'virtual:pwa-register/react'
+import { useQuery } from '@tanstack/react-query'
 import {
     ChartNoAxesCombined,
     LayoutDashboard,
@@ -11,7 +12,7 @@ import { type FormEvent, useEffect, useState } from 'react'
 import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom'
 import coach from '../assets/mascot/coach.webp'
 import dinoMark from '../assets/mascot/dino-mark-v2.webp'
-import { setTokenProvider } from '../lib/api'
+import { api, queryKeys, setTokenProvider } from '../lib/api'
 import { useAppAuth } from '../lib/auth'
 import { Button, Field, ToastProvider } from './ui'
 
@@ -48,8 +49,12 @@ export function Brand({ compact = false }: { compact?: boolean }) {
 export function ProtectedLayout() {
     const auth = useAppAuth()
     const location = useLocation()
-    useEffect(() => setTokenProvider(auth.getToken), [auth.getToken])
-    if (auth.isLoading)
+    const [tokenReady, setTokenReady] = useState(false)
+    useEffect(() => {
+        setTokenProvider(auth.getToken)
+        setTokenReady(true)
+    }, [auth.getToken])
+    if (auth.isLoading || !tokenReady)
         return (
             <div className="auth-loading">
                 <img src={coach} alt="Macrosaurus coach" />
@@ -63,6 +68,35 @@ export function ProtectedLayout() {
                 replace
                 state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
             />
+        )
+    return <AuthenticatedLayout />
+}
+
+function AuthenticatedLayout() {
+    const location = useLocation()
+    const status = useQuery({ queryKey: queryKeys.coachingStatus, queryFn: api.coachingStatus })
+    if (status.isLoading)
+        return (
+            <div className="auth-loading">
+                <img src={coach} alt="" />
+                <p>Getting your program ready…</p>
+            </div>
+        )
+    if (status.error)
+        return (
+            <ToastProvider>
+                <div className="route-error">
+                    <p>Could not load coaching status. Refresh to try again.</p>
+                </div>
+            </ToastProvider>
+        )
+    if (!status.data?.setupComplete && location.pathname !== '/setup')
+        return <Navigate to="/setup" replace />
+    if (location.pathname === '/setup')
+        return (
+            <ToastProvider>
+                <Outlet />
+            </ToastProvider>
         )
     return (
         <ToastProvider>

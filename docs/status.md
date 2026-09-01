@@ -33,8 +33,9 @@ This document separates implemented behavior from architecture planned for later
 - Full diary entry editing, deletion, and exact copies to another date/time.
 - Unified food and recipe tracking search.
 - Macro-calculated calories and optional explicit calories.
-- Fixed or expenditure-relative calorie goals, guided g/kg macros, custom grams,
-  percentage splits, and custom micronutrient targets.
+- Required, reload-safe guided goal setup after account creation, with coached or
+  fixed manual targets and profile reruns that create revisions.
+- Custom micronutrient targets.
 
 ### Recipes, weight, and expenditure
 
@@ -42,7 +43,11 @@ This document separates implemented behavior from architecture planned for later
 - Per-serving calculations.
 - Estimated raw yield and explicit finished weight.
 - Weight measurements.
-- Mifflin–St Jeor baseline and guarded adaptive estimate.
+- Mifflin–St Jeor baseline plus robust 21-day adaptive expenditure and weight
+  trend estimates with confidence and uncertainty bands.
+- Monday check-ins with missing/partial-day review, optional estimates or
+  exclusions, weigh-in prompts, explained proposals, and explicit accept/skip.
+- Date-effective goal and nutrition-program history with guarded weekly changes.
 
 ### Acquisition and sharing
 
@@ -70,7 +75,7 @@ This document separates implemented behavior from architecture planned for later
 - Open Food Facts caching, retry/backoff, and text search.
 - Personal API tokens, approved third-party app registration, quotas, and webhooks.
 - Account export, deletion, and retention workflows.
-- Delegated coach access or coaching UI.
+- Delegated human-coach access.
 - Activity events, wearables, Apple Health, or Health Connect.
 - Background worker deployment and durable job queue.
 - Automatic image/draft cleanup.

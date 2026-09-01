@@ -33,6 +33,12 @@ The centered `/track` action renders as a modal on desktop and a bottom sheet on
 mobile. Foods, recipes, scanning, and goal editing are secondary flows rather
 than primary navigation destinations. Legacy URLs redirect into the new shell.
 
+Authenticated users without a complete coaching program are sent to the
+reload-safe `/setup` journey. The same journey is launched from Profile to create
+a new dated goal/program revision. Dashboard exposes a Monday reminder when due;
+`/check-in` reviews missing or partial nutrition, offers a weigh-in, displays the
+new estimate with uncertainty, and requires explicit accept or skip.
+
 Dashboard requests the displayed week as a range and resolves goals for the
 same dates. Its seven-day chart keeps consumption and targets visible together.
 Food Log owns diary mutations and presents entries chronologically rather than
@@ -40,6 +46,10 @@ grouping them into meals. Track opens on unified food/recipe search, with tabs f
 barcode acquisition, quick entry, and other tracking actions. Blank search also
 shows recent results and time-of-day go-tos derived from diary history; new entries
 use the current instant.
+
+Progress requests a 90-day model series and renders measured weight, trend
+weight, expenditure, and their uncertainty bands. Text summaries remain present
+so the SVG charts are not the only way to understand the result.
 
 ## Authentication
 

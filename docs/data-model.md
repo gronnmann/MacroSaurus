@@ -11,6 +11,8 @@ Flyway applies migrations in order:
 | `V3__energy_estimates.sql` | Persisted expenditure estimates |
 | `V4__nutrient_targets.sql` | Reference-set structure and custom user targets |
 | `V5__app_tracking_and_goals.sql` | Diary portion identity and calorie/macro goal rules |
+| `V6__tracking_history_indexes.sql` | History lookup indexes |
+| `V7__adaptive_coaching.sql` | Setup drafts, weight goals, program revisions, check-ins, day review, and uncertainty fields |
 
 Never edit a migration after it has been applied outside an expendable local
 database. Add a new numbered migration.
@@ -109,25 +111,49 @@ Yield precedence:
 2. `estimated_yield_g`, available only when every ingredient resolves to mass.
 3. No per-100-g result if neither is available.
 
-## Weigh-ins and expenditure
+## Goals and nutrition programs
+
+`weight_goals` stores a user's intended direction, target weight, weekly rate,
+and lifecycle. Only the active goal drives coaching. Rerunning setup archives the
+old goal and creates a new one rather than rewriting history.
+
+`nutrition_program_revisions` stores date-effective calories, macros, expenditure
+inputs, algorithm version, source, and coached/manual style. Each user has at most
+one open-ended revision. Accepting a check-in closes the previous revision and
+starts another, so historical diary dates resolve against the targets in effect
+at the time.
+
+`coaching_setup_drafts` contains the current step and JSON payload. The draft is
+deleted only after setup completes. `weekly_check_ins` records the Monday week,
+calculated proposal, and whether it was accepted or skipped.
+
+## Reviewed nutrition, weigh-ins, and expenditure
 
 Weight is stored in kilograms regardless of display preference.
+
+`nutrition_day_reviews` is separate from diary entries. Confirmed days have full
+weight in the model, estimates have partial weight, and excluded/fasting days do
+not contribute intake. An estimate never fabricates foods or nutrient snapshots.
 
 The baseline estimate uses Mifflin–St Jeor when the profile provides adult age,
 height, supported formula sex, activity multiplier, and a weight measurement.
 
-Adaptive eligibility currently requires, within the 21-day window:
+Adaptive eligibility requires, within the 21-day window:
 
-- At least 14 days containing diary entries.
-- At least four weight measurements.
+- At least 14 effective reviewed nutrition days.
+- At least four distinct weigh-in days.
 - At least 14 days between first and last relevant measurement.
+- At least one weigh-in in the most recent seven days.
 
-The adaptive estimate combines average intake on logged days with weight change
-using 7,700 kcal/kg, then clamps the suggestion to ±10% of baseline. It is an
-early wellness estimate, not a validated clinical algorithm.
+`energy-v2` uses a Huber-weighted linear regression for weight trend, combines
+mean reviewed intake with weight change using 7,700 kcal/kg, and blends that
+adaptive result with the baseline by inverse uncertainty. It exposes 95% model
+ranges for both expenditure and trend weight. These are model uncertainty ranges,
+not guaranteed physiological bounds or clinical predictions.
 
 Persisted estimates include algorithm version, inputs-derived explanation,
-confidence, and date so future algorithm versions do not become ambiguous.
+confidence, model state, uncertainty bounds, requirements, and date so future
+algorithm versions do not become ambiguous.
 
 ## Sharing
 

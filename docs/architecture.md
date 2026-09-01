@@ -27,10 +27,10 @@ flowchart LR
 | `identity` | Request user identity, profiles, nutrient targets, security configuration | `catalog`, `shared` |
 | `catalog` | Nutrient definitions, foods, immutable food revisions, portions | `shared` |
 | `recipes` | Recipe revisions, ingredient quantities, yields | `catalog`, `shared` |
-| `tracking` | Diary entries, quick tracking, daily totals | `catalog`, `recipes`, `identity`, `shared` |
+| `tracking` | Diary entries, quick tracking, daily totals, coaching-day reviews | `catalog`, `recipes`, `identity`, `shared` |
 | `measurements` | Weight measurements | `shared` |
 | `expenditure` | Baseline and adaptive expenditure estimates | `identity`, `measurements`, `tracking`, `shared` |
-| `goals` | Calorie rules and resolved macro targets | `expenditure`, `measurements`, `shared` |
+| `goals` | Guided setup, weight goals, program revisions, weekly check-ins, resolved targets | `expenditure`, `identity`, `measurements`, `tracking`, `shared` |
 | `acquisition` | EAN/UPC validation, OFF lookup, OpenRouter extraction | `catalog`, `shared` |
 | `sharing` | Revocable immutable snapshots | `catalog`, `recipes`, `shared` |
 | `shared` | Nutrient arithmetic, JSON support, current-user contract, API problems | Nothing feature-specific |
@@ -55,7 +55,9 @@ flowchart TD
     expenditure --> tracking
     expenditure --> shared
     goals --> expenditure
+    goals --> identity
     goals --> measurements
+    goals --> tracking
     goals --> shared
     acquisition --> catalog
     acquisition --> shared
@@ -128,6 +130,28 @@ The recipe module resolves every ingredient through the catalog, sums nutrient
 snapshots, and stores an immutable recipe revision. If all ingredients have mass,
 their sum becomes an estimated raw yield. An explicit finished weight takes
 precedence for per-100-g calculations.
+
+### Weekly coaching update
+
+```mermaid
+sequenceDiagram
+    participant W as Web
+    participant G as Goals
+    participant T as Tracking
+    participant E as Expenditure
+    participant D as PostgreSQL
+    W->>G: Open Monday check-in
+    G->>T: Find missing/partial days
+    W->>T: Confirm, estimate, or exclude each day
+    W->>G: Refresh proposal
+    G->>E: Estimate from reviewed intake + weight trend
+    G-->>W: Explain uncertainty and proposed targets
+    W->>G: Accept or skip
+    G->>D: Insert dated program revision when accepted
+```
+
+The model proposes; the user decides. Manual programs never receive automatic
+target changes, and coached changes are capped per review to reduce overreaction.
 
 ### Scan a product
 

@@ -17,3 +17,16 @@ fun interface WeightHistory {
         limit: Int,
     ): List<WeightMeasurement>
 }
+
+data class NewWeightMeasurement(
+    val weightKg: BigDecimal,
+    val measuredAt: OffsetDateTime,
+    val note: String? = null,
+)
+
+fun interface WeightRecorder {
+    fun record(
+        userId: String,
+        measurement: NewWeightMeasurement,
+    ): WeightMeasurement
+}

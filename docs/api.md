@@ -52,8 +52,6 @@ Validation errors may include an `errors` object keyed by field name.
 | `GET` | `/me/targets` | List every nutrient and current custom target |
 | `PUT` | `/me/targets/{nutrientCode}` | Set target/minimum/maximum |
 | `DELETE` | `/me/targets/{nutrientCode}` | Clear a custom target |
-| `GET` | `/me/goals` | Return calorie and macro goal rules |
-| `PUT` | `/me/goals` | Save calorie and macro goal rules |
 | `GET` | `/me/goals/resolved?from={date}&to={date}` | Resolve up to 31 days of targets |
 
 Profile example:
@@ -83,23 +81,52 @@ Target example:
 
 At least one target field is required, and minimum cannot exceed maximum.
 
-Energy modes are `FIXED`, `MAINTENANCE`, `KCAL_DELTA`, and `PERCENT_DELTA`.
-Macro modes are `GUIDED`, `CUSTOM_GRAMS`, and `PERCENT_SPLIT`. Guided mode uses
-protein g/kg, fat percentage, and carbohydrate calories as the remainder:
+## Goal setup and weekly coaching
+
+The setup draft is persisted after each step, so an interrupted onboarding or
+profile rerun resumes on another device. Completing setup atomically saves the
+profile, initial weigh-in, active weight goal, and a dated nutrition-program
+revision.
+
+| Method | Path | Behavior |
+|---|---|---|
+| `GET` | `/me/coaching/status` | Setup state, active goal/program, and Monday check-in due date |
+| `GET` | `/me/coaching/setup-draft` | Resume setup or populate a rerun from current values |
+| `PUT` | `/me/coaching/setup-draft` | Save the current setup step and inputs |
+| `POST` | `/me/coaching/setup-draft/preview` | Preview expenditure, targets, and estimated completion |
+| `POST` | `/me/coaching/setup-draft/complete` | Start or revise the active goal and program |
+| `GET` | `/me/coaching/check-ins/current` | Open the due weekly review and detect incomplete nutrition days |
+| `POST` | `/me/coaching/check-ins/{id}/refresh` | Recalculate expenditure and propose targets after data review |
+| `POST` | `/me/coaching/check-ins/{id}/accept` | Accept the proposal as a new dated program revision |
+| `POST` | `/me/coaching/check-ins/{id}/skip` | Keep current targets and close this week's review |
+
+Setup accepts `LOSS`, `MAINTAIN`, or `GAIN`, plus either a `COACHED` adaptive
+program or fixed `MANUAL` calories and macros. Coached loss rates are 0.25–1.0%
+of body weight per week and gain rates are 0.10–0.50%:
 
 ```json
 {
-  "energyMode": "PERCENT_DELTA",
-  "energyValue": -10,
-  "macroMode": "GUIDED",
+  "currentStep": 5,
+  "displayName": "Ada",
+  "locale": "en-NO",
+  "timezone": "Europe/Oslo",
+  "birthDate": "1990-05-10",
+  "heightCm": 171.5,
+  "formulaSex": "FEMALE",
+  "activityMultiplier": 1.4,
+  "weightKg": 72.4,
+  "goalType": "LOSS",
+  "targetWeightKg": 68,
+  "weeklyRatePercent": 0.5,
+  "programStyle": "COACHED",
   "proteinGPerKg": 1.8,
-  "fatEnergyPercent": 25,
-  "weightBasis": "LATEST_WEIGHT"
+  "fatEnergyPercent": 25
 }
 ```
 
-Relative energy goals use the latest expenditure estimate. `MANUAL_WEIGHT`
-requires `manualWeightKg`; `LATEST_WEIGHT` uses the newest applicable weigh-in.
+Accepted target changes are limited to 100 kcal/day per weekly review. Manual
+programs still receive trend and expenditure insights, but check-ins do not alter
+their targets.
 
 ## Nutrients and foods
 
@@ -161,6 +188,7 @@ Resolve 1.5 scoops:
 |---|---|---|
 | `GET` | `/diary-days/{date}` | Entries and nutrient totals for one date |
 | `GET` | `/diary-days?from={date}&to={date}` | Up to 93 inclusive days |
+| `PUT` | `/diary-days/{date}/analysis` | Confirm, estimate, exclude, or mark a day as fasting for coaching |
 | `POST` | `/diary-entries/food` | Track a resolved food amount |
 | `POST` | `/diary-entries/recipe` | Track recipe servings |
 | `POST` | `/quick-entries` | Track macros without requiring a food |
@@ -218,6 +246,11 @@ macro fields. Copying preserves the exact original nutrient snapshot:
 Omit `destinationTime` to preserve the original wall-clock time in the user's
 profile timezone.
 
+The weekly check-in flags blank days and unusually low days. A review status is
+one of `CONFIRMED_COMPLETE`, `ESTIMATED_TOTAL`, `EXCLUDED`, or `FASTING`.
+`ESTIMATED_TOTAL` requires `estimatedTotalKcal`. Estimated totals affect only the
+expenditure model; they never insert synthetic diary foods or macros.
+
 ## Recipes
 
 | Method | Path | Behavior |
@@ -260,6 +293,7 @@ nutrients when an explicit or complete estimated yield is available.
 | `POST` | `/weight-measurements` | Add 10–700 kg measurement |
 | `DELETE` | `/weight-measurements/{id}` | Delete owned measurement |
 | `GET` | `/expenditure-estimates/current` | Calculate current estimate |
+| `GET` | `/expenditure-estimates/series?from={date}&to={date}` | Weight/expenditure trend and uncertainty series |
 
 ```json
 {
@@ -269,9 +303,12 @@ nutrients when an explicit or complete estimated yield is available.
 }
 ```
 
-Append `?persist=true` to the expenditure endpoint to store the calculated
-estimate. Adaptive mode requires 14 logged diary days and four weigh-ins spanning
-at least 14 days within the 21-day window.
+Append `?persist=true` to the current endpoint to store the calculated estimate.
+`energy-v2` starts with Mifflin–St Jeor, then uses reviewed intake and a robust
+21-day weight regression. Adaptive mode requires 14 effective reviewed days and
+four weigh-in days spanning at least 14 days, including a recent weigh-in.
+Responses include calorie and trend-weight lower/upper bounds, confidence, and a
+model state: `BASELINE`, `UPDATING`, `HOLDING`, or `INSUFFICIENT`.
 
 ## Barcodes and label extraction
 

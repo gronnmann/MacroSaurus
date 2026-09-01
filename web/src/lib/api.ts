@@ -1,5 +1,8 @@
 import type {
     BarcodeCandidate,
+    CheckIn,
+    CoachingSetupDraft,
+    CoachingStatus,
     CreatedShare,
     DiaryDay,
     DiaryEntry,
@@ -10,13 +13,16 @@ import type {
     LastTrackedAmount,
     NutrientDefinition,
     NutrientTarget,
+    NutritionDayReview,
     ProblemDetails,
     Profile,
+    ProgressSeriesPoint,
     Recipe,
     RecipeInput,
     ResolvedFoodAmount,
     ResolvedGoal,
     ScanJob,
+    SetupPreview,
     SharedSnapshot,
     TimeOfDaySuggestions,
     Trackable,
@@ -70,6 +76,35 @@ export const api = {
     profile: () => request<Profile>('/me/profile'),
     updateProfile: (input: Omit<Profile, 'userId'>) =>
         request<Profile>('/me/profile', { method: 'PUT', body: body(input) }),
+    coachingStatus: () => request<CoachingStatus>('/me/coaching/status'),
+    setupDraft: () => request<CoachingSetupDraft>('/me/coaching/setup-draft'),
+    saveSetupDraft: (input: CoachingSetupDraft) =>
+        request<CoachingSetupDraft>('/me/coaching/setup-draft', {
+            method: 'PUT',
+            body: body(input),
+        }),
+    previewSetup: (input: CoachingSetupDraft) =>
+        request<SetupPreview>('/me/coaching/setup-draft/preview', {
+            method: 'POST',
+            body: body(input),
+        }),
+    completeSetup: (input: CoachingSetupDraft) =>
+        request<CoachingStatus>('/me/coaching/setup-draft/complete', {
+            method: 'POST',
+            body: body(input),
+        }),
+    currentCheckIn: () => request<CheckIn>('/me/coaching/check-ins/current'),
+    refreshCheckIn: (id: string) =>
+        request<CheckIn>(`/me/coaching/check-ins/${id}/refresh`, { method: 'POST' }),
+    acceptCheckIn: (id: string) =>
+        request<CheckIn>(`/me/coaching/check-ins/${id}/accept`, { method: 'POST' }),
+    skipCheckIn: (id: string) =>
+        request<CheckIn>(`/me/coaching/check-ins/${id}/skip`, { method: 'POST' }),
+    reviewNutritionDay: (date: string, input: Omit<NutritionDayReview, 'date'>) =>
+        request<NutritionDayReview>(`/diary-days/${date}/analysis`, {
+            method: 'PUT',
+            body: body(input),
+        }),
     targets: () => request<NutrientTarget[]>('/me/targets'),
     setTarget: (
         code: string,
@@ -155,6 +190,8 @@ export const api = {
     deleteWeight: (id: string) => request<void>(`/weight-measurements/${id}`, { method: 'DELETE' }),
     expenditure: (persist = false) =>
         request<EnergyEstimate>(`/expenditure-estimates/current?persist=${persist}`),
+    progressSeries: (from: string, to: string) =>
+        request<ProgressSeriesPoint[]>(`/expenditure-estimates/series?from=${from}&to=${to}`),
     barcode: (code: string) => request<BarcodeCandidate[]>(`/barcodes/${encodeURIComponent(code)}`),
     importBarcode: (code: string) =>
         request<Food>(`/barcodes/${encodeURIComponent(code)}/import`, {
@@ -184,6 +221,9 @@ export const api = {
 export const queryKeys = {
     nutrients: ['nutrients'] as const,
     profile: ['profile'] as const,
+    coachingStatus: ['coaching-status'] as const,
+    setupDraft: ['coaching-setup-draft'] as const,
+    checkIn: ['coaching-check-in'] as const,
     targets: ['targets'] as const,
     goals: ['goals'] as const,
     resolvedGoals: (from: string, to = from) => ['resolved-goals', from, to] as const,
@@ -198,5 +238,6 @@ export const queryKeys = {
     recipe: (id: string) => ['recipe', id] as const,
     weights: ['weights'] as const,
     expenditure: ['expenditure'] as const,
+    progressSeries: (from: string, to: string) => ['progress-series', from, to] as const,
     scan: (id: string) => ['scan', id] as const,
 }

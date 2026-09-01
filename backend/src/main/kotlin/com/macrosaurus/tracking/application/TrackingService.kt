@@ -18,8 +18,13 @@ import com.macrosaurus.tracking.DailyNutrition
 import com.macrosaurus.tracking.DiaryEntrySnapshot
 import com.macrosaurus.tracking.DiaryEntryType
 import com.macrosaurus.tracking.Meal
+import com.macrosaurus.tracking.NutritionDayReview
+import com.macrosaurus.tracking.NutritionDayReviewer
+import com.macrosaurus.tracking.NutritionDayStatus
 import com.macrosaurus.tracking.NutritionHistory
+import com.macrosaurus.tracking.NutritionReviewCandidate
 import com.macrosaurus.tracking.persistence.JooqDiaryRepository
+import com.macrosaurus.tracking.persistence.JooqNutritionDayReviewRepository
 import com.macrosaurus.tracking.persistence.TrackableUse
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -122,13 +127,15 @@ internal data class QuickTrackResult(
 @Service
 internal class TrackingService(
     private val repository: JooqDiaryRepository,
+    private val dayReviews: JooqNutritionDayReviewRepository,
     private val catalog: FoodCatalog,
     private val foodResolver: FoodResolver,
     private val foodCreator: FoodCreator,
     private val recipes: RecipeReader,
     private val profiles: ProfileReader,
     private val clock: Clock,
-) : NutritionHistory {
+) : NutritionHistory,
+    NutritionDayReviewer {
     fun day(
         userId: String,
         date: LocalDate,
@@ -355,7 +362,92 @@ internal class TrackingService(
         userId: String,
         from: LocalDate,
         to: LocalDate,
-    ): List<DailyNutrition> = summary(userId, from, to).map { DailyNutrition(it.date, it.entries.size, it.totals) }
+    ): List<DailyNutrition> {
+        val reviews = dayReviews.findBetween(userId, from, to)
+        return summary(userId, from, to).map { day ->
+            val review = reviews[day.date]
+            val loggedEnergy = day.totals["energy_kcal"]
+            when (review?.status) {
+                NutritionDayStatus.CONFIRMED_COMPLETE -> {
+                    DailyNutrition(day.date, day.entries.size, day.totals, review.status, loggedEnergy, BigDecimal.ONE)
+                }
+
+                NutritionDayStatus.ESTIMATED_TOTAL -> {
+                    DailyNutrition(day.date, day.entries.size, day.totals, review.status, review.estimatedTotalKcal, BigDecimal("0.5"))
+                }
+
+                NutritionDayStatus.EXCLUDED -> {
+                    DailyNutrition(day.date, day.entries.size, day.totals, review.status, null, BigDecimal.ZERO)
+                }
+
+                NutritionDayStatus.FASTING -> {
+                    DailyNutrition(day.date, day.entries.size, day.totals, review.status, BigDecimal.ZERO, BigDecimal.ONE)
+                }
+
+                else -> {
+                    if (day.entries.isEmpty()) {
+                        DailyNutrition(day.date, 0, day.totals, NutritionDayStatus.MISSING, null, BigDecimal.ZERO)
+                    } else {
+                        DailyNutrition(day.date, day.entries.size, day.totals, NutritionDayStatus.LOGGED, loggedEnergy, BigDecimal.ONE)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun saveReview(
+        userId: String,
+        review: NutritionDayReview,
+    ): NutritionDayReview {
+        if (review.status in setOf(NutritionDayStatus.LOGGED, NutritionDayStatus.MISSING)) {
+            throw InvalidOperationException("Choose a review outcome")
+        }
+        if (review.status == NutritionDayStatus.ESTIMATED_TOTAL &&
+            (review.estimatedTotalKcal == null || review.estimatedTotalKcal < BigDecimal.ZERO)
+        ) {
+            throw InvalidOperationException("Estimated total calories must be zero or greater")
+        }
+        val normalized =
+            if (review.status == NutritionDayStatus.ESTIMATED_TOTAL) review else review.copy(estimatedTotalKcal = null)
+        dayReviews.save(userId, normalized)
+        return normalized
+    }
+
+    override fun candidates(
+        userId: String,
+        from: LocalDate,
+        to: LocalDate,
+    ): List<NutritionReviewCandidate> {
+        if (to.isBefore(from) || to.isAfter(from.plusDays(30))) {
+            throw InvalidOperationException("Review range must be between 1 and 31 days")
+        }
+        val days = dailyNutrition(userId, from.minusDays(7), to)
+        val comparison =
+            days
+                .mapNotNull { day ->
+                    day.analysisEnergyKcal?.takeIf { it > BigDecimal.ZERO && day.analysisStatus != NutritionDayStatus.ESTIMATED_TOTAL }
+                }.sorted()
+        val median =
+            if (comparison.size >= 3) {
+                val middle = comparison.size / 2
+                if (comparison.size % 2 == 0) comparison[middle - 1].add(comparison[middle]).divide(BigDecimal("2")) else comparison[middle]
+            } else {
+                null
+            }
+        val saved = dayReviews.findBetween(userId, from, to)
+        return days.filter { !it.date.isBefore(from) }.mapNotNull { day ->
+            val low =
+                median != null && day.analysisEnergyKcal != null && day.analysisEnergyKcal > BigDecimal.ZERO &&
+                    day.analysisEnergyKcal < median.multiply(BigDecimal("0.5"))
+            val reason =
+                when {
+                    day.entryCount == 0 -> "MISSING"
+                    low -> "POSSIBLE_PARTIAL"
+                    else -> null
+                } ?: return@mapNotNull null
+            NutritionReviewCandidate(day.date, day.totals["energy_kcal"], day.entryCount, reason, saved[day.date])
+        }
+    }
 
     fun trackables(
         userId: String,

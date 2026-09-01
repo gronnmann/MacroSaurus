@@ -171,6 +171,130 @@ export interface EnergyEstimate {
     algorithmVersion: string
     explanation: string[]
     requirements: Record<string, number>
+    lowerKcal?: number
+    upperKcal?: number
+    trendWeightKg?: number
+    trendWeightLowerKg?: number
+    trendWeightUpperKg?: number
+    modelState: 'BASELINE' | 'UPDATING' | 'HOLDING' | 'INSUFFICIENT'
+}
+
+export type WeightGoalType = 'LOSS' | 'MAINTAIN' | 'GAIN'
+export type ProgramStyle = 'COACHED' | 'MANUAL'
+
+export interface WeightGoal {
+    id: string
+    type: WeightGoalType
+    startingWeightKg: number
+    targetWeightKg?: number
+    weeklyRatePercent: number
+    status: 'ACTIVE' | 'COMPLETED' | 'ARCHIVED'
+    startedOn: string
+    endedOn?: string
+}
+
+export interface NutritionProgram {
+    id: string
+    goalId?: string
+    style: ProgramStyle
+    effectiveFrom: string
+    effectiveTo?: string
+    energyKcal?: number
+    proteinG?: number
+    carbohydrateG?: number
+    fatG?: number
+    proteinGPerKg?: number
+    fatEnergyPercent?: number
+    expenditureKcal?: number
+    expenditureLowerKcal?: number
+    expenditureUpperKcal?: number
+    algorithmVersion?: string
+    source: 'ONBOARDING' | 'CHECK_IN' | 'PROFILE_RERUN' | 'LEGACY' | 'MANUAL_API'
+}
+
+export interface CoachingStatus {
+    setupComplete: boolean
+    goal?: WeightGoal
+    program?: NutritionProgram
+    nextCheckInDate?: string
+    checkInDue: boolean
+}
+
+export interface CoachingSetupDraft {
+    currentStep: number
+    displayName?: string
+    locale: string
+    timezone: string
+    birthDate?: string
+    heightCm?: number
+    formulaSex?: 'MALE' | 'FEMALE'
+    activityMultiplier: number
+    weightKg?: number
+    goalType?: WeightGoalType
+    targetWeightKg?: number
+    weeklyRatePercent?: number
+    programStyle?: ProgramStyle
+    proteinGPerKg: number
+    fatEnergyPercent: number
+    manualEnergyKcal?: number
+    manualProteinG?: number
+    manualCarbohydrateG?: number
+    manualFatG?: number
+}
+
+export interface SetupPreview {
+    expenditure: EnergyEstimate
+    energyKcal: number
+    proteinG: number
+    carbohydrateG: number
+    fatG: number
+    estimatedCompletionDate?: string
+    warnings: string[]
+}
+
+export type NutritionDayStatus = 'CONFIRMED_COMPLETE' | 'ESTIMATED_TOTAL' | 'EXCLUDED' | 'FASTING'
+
+export interface NutritionDayReview {
+    date: string
+    status: NutritionDayStatus
+    estimatedTotalKcal?: number
+}
+
+export interface NutritionReviewCandidate {
+    date: string
+    loggedEnergyKcal?: number
+    entryCount: number
+    reason: 'MISSING' | 'POSSIBLE_PARTIAL'
+    review?: NutritionDayReview
+}
+
+export interface CheckInProposal {
+    estimate: EnergyEstimate
+    previousEnergyKcal?: number
+    proposedEnergyKcal?: number
+    proposedProteinG?: number
+    proposedCarbohydrateG?: number
+    proposedFatG?: number
+    targetUpdateAvailable: boolean
+    warnings: string[]
+}
+
+export interface CheckIn {
+    due: boolean
+    id?: string
+    weekStart?: string
+    periodFrom?: string
+    periodTo?: string
+    status?: 'DRAFT' | 'ACCEPTED' | 'SKIPPED'
+    candidates: NutritionReviewCandidate[]
+    needsWeight: boolean
+    proposal?: CheckInProposal
+}
+
+export interface ProgressSeriesPoint {
+    date: string
+    measuredWeightKg?: number
+    expenditure: EnergyEstimate
 }
 
 export interface Trackable {

@@ -1,7 +1,9 @@
 package com.macrosaurus.measurements.application
 
+import com.macrosaurus.measurements.NewWeightMeasurement
 import com.macrosaurus.measurements.WeightHistory
 import com.macrosaurus.measurements.WeightMeasurement
+import com.macrosaurus.measurements.WeightRecorder
 import com.macrosaurus.measurements.persistence.JooqMeasurementRepository
 import com.macrosaurus.shared.NotFoundException
 import org.springframework.stereotype.Service
@@ -20,7 +22,8 @@ internal data class AddWeightCommand(
 internal class MeasurementService(
     private val repository: JooqMeasurementRepository,
     private val clock: Clock,
-) : WeightHistory {
+) : WeightHistory,
+    WeightRecorder {
     override fun list(
         userId: String,
         limit: Int,
@@ -40,6 +43,11 @@ internal class MeasurementService(
         repository.insert(userId, measurement)
         return repository.get(userId, measurement.id) ?: throw NotFoundException("Weight measurement was not found")
     }
+
+    override fun record(
+        userId: String,
+        measurement: NewWeightMeasurement,
+    ): WeightMeasurement = add(userId, AddWeightCommand(measurement.weightKg, measurement.measuredAt, measurement.note))
 
     fun delete(
         userId: String,

@@ -62,6 +62,19 @@ test('prepares USDA Foundation foods and uses stable nutrient ids', () => {
     assert.deepEqual(release.foods[0].portions, [{ name: '0.5 medium banana', gramWeight: 118, default: true }])
 })
 
+test('ignores null placeholders in USDA exports', () => {
+    const release = prepareUsdaRelease(
+        {
+            FoundationFoods: [{ fdcId: 123, description: 'Example food' }, null],
+        },
+        'USDA_FOUNDATION',
+        '2026-04',
+    )
+
+    assert.equal(release.foods.length, 1)
+    assert.equal(release.foods[0].externalId, '123')
+})
+
 test('rejects a USDA dataset that does not match the selected source', () => {
     assert.throws(
         () => prepareUsdaRelease({ BrandedFoods: [] }, 'USDA_FOUNDATION', '2026-04'),

@@ -215,7 +215,8 @@ export function prepareUsdaRelease(document, source, releaseKey, checksum = 'fix
         source,
         releaseKey,
         checksum,
-        foods: foods.map((food) => {
+        // FoodData Central exports can contain trailing null placeholders.
+        foods: foods.filter((food) => food !== null).map((food) => {
             const externalId = cleanText(food.fdcId)
             const name = cleanText(food.description)
             if (!externalId || !name) throw new Error(`USDA ${source} food is missing fdcId or description`)

@@ -10,11 +10,20 @@ foods and common nutrient definitions so the app works immediately.
 The explicit release importer accepts `USDA_FOUNDATION` and `USDA_SR_LEGACY`
 normalized releases at `POST /api/v1/admin/catalog-imports`. Use the Foundation
 April 2026 and SR Legacy April 2018 JSON downloads, excluding Branded and FNDDS
-data. Extract the downloaded archive and prepare it with:
+data. On a production host, download, prepare, and import both USDA releases and
+Matvaretabellen in one idempotent operation (Node runs in a temporary container):
+
+```sh
+MACROSAURUS_TOKEN='your-admin-supabase-access-token' ./scripts/seed.sh
+```
+
+The token must belong to a user listed in `ADMIN_USER_IDS`, and the production
+deployment must already be running. For manual preparation, extract the USDA
+archives and run:
 
 ```sh
 node scripts/prepare-catalog-release.mjs usda-foundation \
-  --release 2026-04 --input FoodData_Central_foundation_food_json_2026-04-16.json \
+  --release 2026-04 --input FoodData_Central_foundation_food_json_2026-04-30.json \
   --output foundation-2026-04.json
 node scripts/prepare-catalog-release.mjs usda-sr-legacy \
   --release 2018-04 --input FoodData_Central_sr_legacy_food_json_2018-04.json \

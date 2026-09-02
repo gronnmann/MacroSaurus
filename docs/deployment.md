@@ -128,10 +128,11 @@ docker compose --env-file .env.production -f compose.production.yml logs -f back
 curl --fail http://127.0.0.1:8080/
 ```
 
-Seed public food catalogs separately after the backend is healthy. This starts a
-short-lived importer inside the running backend container and writes through the
-same transactional catalog service directly to PostgreSQL. It binds a random
-internal port during startup but does not use the catalog HTTP API:
+Seed public food catalogs separately from deployment. This starts a database-only
+one-off container using the backend image and configured database credentials,
+then writes through the same transactional catalog service directly to
+PostgreSQL. It does not require the application services to be running, start a
+server, or use the catalog HTTP API:
 
 ```bash
 ./scripts/seed.sh --source both

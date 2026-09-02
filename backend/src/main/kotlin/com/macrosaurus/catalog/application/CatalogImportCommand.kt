@@ -6,6 +6,7 @@ import com.macrosaurus.catalog.CatalogImporter
 import com.macrosaurus.catalog.ImportedFood
 import com.macrosaurus.catalog.PortionDraft
 import com.macrosaurus.catalog.SourceKind
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
 import java.io.InputStream
@@ -51,6 +52,12 @@ internal class CatalogImportCommandHandler(
         output: OutputStream,
     ) {
         val release = mapper.readValue(input, CatalogReleaseInput::class.java)
+        logger.info(
+            "Parsed {} {} release with {} foods; starting direct database import",
+            release.source,
+            release.releaseKey,
+            release.foods.size,
+        )
         val result =
             importer.importRelease(
                 release.source,
@@ -84,5 +91,9 @@ internal class CatalogImportCommandHandler(
         output.write(mapper.writeValueAsBytes(result))
         output.write('\n'.code)
         output.flush()
+    }
+
+    private companion object {
+        val logger = LoggerFactory.getLogger(CatalogImportCommandHandler::class.java)
     }
 }

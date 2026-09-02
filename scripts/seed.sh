@@ -23,7 +23,7 @@ usage() {
 Usage: ./scripts/seed.sh [--source usda|matvaretabellen|both]
 
 Download, normalize, and directly import pinned food catalog releases through a
-short-lived JVM process in the running production backend container. The imports
+database-only one-off container using the production backend image. The imports
 are idempotent when the source releases have not changed. The default source is
 both.
 
@@ -97,12 +97,6 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 "${compose[@]}" config --quiet
-backend_container="$("${compose[@]}" ps --status running -q backend)"
-if [[ -z "$backend_container" ]]; then
-    echo "The production backend is not running. Run ./scripts/deploy.sh first." >&2
-    exit 1
-fi
-readonly backend_container
 
 seed_temp_parent="${SEED_TMPDIR:-${TMPDIR:-/tmp}}"
 seed_work_directory="$(mktemp -d "$seed_temp_parent/macrosaurus-seed.XXXXXX")"
@@ -156,9 +150,8 @@ import_release() {
     local release_file="$1"
 
     echo "Importing $(basename "$release_file")..."
-    docker exec -i "$backend_container" \
-        java -jar /app/app.jar \
-        --server.port=0 \
+    "${compose[@]}" run --rm --no-deps -T backend \
+        --spring.main.web-application-type=none \
         --spring.main.banner-mode=off \
         --spring.flyway.enabled=false \
         --macrosaurus.catalog-import.enabled=true \

@@ -18,14 +18,14 @@ prepare, and import selected datasets independently of deployment:
 ./scripts/seed.sh --source both
 ```
 
-`both` is the default. USDA includes both Foundation and SR Legacy. The
-production backend container must already be running, but the operation is not
-part of deployment and does not need an application user or access token. The
-script downloads and normalizes data in a temporary Node container, then pipes
-one normalized release at a time into a short-lived JVM process inside the
-running backend container. The process binds a random internal port only to
-satisfy the application's servlet dependencies, calls the transactional catalog
-service and PostgreSQL directly, and does not upload the release over HTTP.
+`both` is the default. USDA includes both Foundation and SR Legacy. The operation
+is independent of deployment and does not need the application to be running, an
+application user, or an access token. The script downloads and normalizes data
+in a temporary Node container, then pipes one normalized release at a time into
+a database-only one-off container using the configured production backend image
+and database credentials. The process starts only the datasource, jOOQ, Jackson,
+and catalog services; it does not start a web server, load authentication, or
+upload the release over HTTP.
 
 For manual preparation, extract the USDA archives and run:
 
@@ -89,11 +89,13 @@ The importer input is a normalized release:
 }
 ```
 
-The seed script sends this JSON over stdin to `/app/app.jar` in catalog-import
-mode on a random temporary internal port. Replaying the same
-source/release/checksum is idempotent. Each release is a
-separate transaction, so if a multi-source run stops partway through, rerun the
-same command: completed releases are skipped and the failed release is retried.
+The seed script sends this JSON over stdin to `/app/app.jar` in database-only
+catalog-import mode. Replaying the same source/release/checksum is idempotent.
+Each normalized release is imported in one transaction, with its food and
+nutrient rows written in database batches. USDA Foundation, USDA SR Legacy, and
+Matvaretabellen remain separate releases so they can be retried and updated
+independently. If a multi-source run stops partway through, rerun the same
+command: completed releases are skipped and the failed release is retried.
 
 ## Open Food Facts
 

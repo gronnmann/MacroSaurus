@@ -15,6 +15,7 @@ import com.macrosaurus.shared.NotFoundException
 import org.jooq.DSLContext
 import org.jooq.impl.DSL.field
 import org.jooq.impl.DSL.table
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Repository
 import java.math.BigDecimal
 import java.time.OffsetDateTime
@@ -221,6 +222,7 @@ internal class JooqCatalogRepository(
         checksum: String,
         foods: List<ImportedFood>,
     ): CatalogImportResult {
+        db.fetch("select pg_advisory_xact_lock(hashtext(?))", "macrosaurus-catalog-${source.name}")
         val existing =
             db.fetchOne(
                 "select status, record_count from food_source_releases where source_kind = ? and release_key = ? and checksum = ?",
@@ -231,6 +233,45 @@ internal class JooqCatalogRepository(
         if (existing?.get("status", String::class.java) == "COMPLETED") {
             return CatalogImportResult(source, releaseKey, existing.get("record_count", Int::class.java) ?: 0, true)
         }
+
+        logger.info("Preparing {} {} with {} foods", source, releaseKey, foods.size)
+        val knownNutrients =
+            db
+                .select(field("code", String::class.java))
+                .from(table("nutrient_definitions"))
+                .fetchSet(field("code", String::class.java))
+        val existingByExternalId =
+            db
+                .fetch(
+                    """
+                    select f.id, f.external_id, coalesce(max(fr.revision), 0) as revision
+                      from foods f
+                      left join food_revisions fr on fr.food_id = f.id
+                     where f.source_kind = ?
+                     group by f.id, f.external_id
+                    """.trimIndent(),
+                    source.name,
+                ).associate { record ->
+                    record.get("external_id", String::class.java)!! to
+                        ExistingImportedFood(
+                            record.get("id", UUID::class.java)!!,
+                            record.get("revision", Int::class.java) ?: 0,
+                        )
+                }
+        val prepared =
+            foods.map { imported ->
+                val draft = imported.toDraft()
+                FoodDraftValidator.validate(draft, knownNutrients)
+                val current = existingByExternalId[imported.externalId]
+                PreparedImportedFood(
+                    imported,
+                    draft,
+                    current?.id ?: UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    (current?.revision ?: 0) + 1,
+                    current != null,
+                )
+            }
         val releaseId = UUID.randomUUID()
         db.execute(
             "insert into food_source_releases(id, source_kind, release_key, checksum, status) values (?, ?, ?, ?, 'IMPORTING')",
@@ -240,62 +281,111 @@ internal class JooqCatalogRepository(
             checksum,
         )
         db.execute("update foods set active = false where source_kind = ?", source.name)
-        foods.forEach { imported ->
-            val draft =
-                FoodDraft(
-                    imported.name,
-                    imported.brand,
-                    imported.barcode,
-                    imported.basisType,
-                    imported.basisAmount,
-                    imported.basisUnit,
-                    imported.densityGPerMl,
-                    imported.nutrients,
-                    imported.portions,
+
+        val newFoods = prepared.filterNot(PreparedImportedFood::existing)
+        val updatedFoods = prepared.filter(PreparedImportedFood::existing)
+        logger.info("Writing {} new and {} existing food records", newFoods.size, updatedFoods.size)
+        executeBatch(
+            "insert into foods(id, source_kind, external_id, barcode, active) values (?, ?, ?, ?, true)",
+            newFoods.map {
+                arrayOf<Any?>(it.foodId, source.name, it.imported.externalId, normalizeBarcode(it.imported.barcode))
+            },
+        )
+        executeBatch(
+            "update foods set barcode = ?, active = true where id = ?",
+            updatedFoods.map { arrayOf<Any?>(normalizeBarcode(it.imported.barcode), it.foodId) },
+        )
+        executeBatch(
+            """
+            insert into food_revisions(id, food_id, revision, name, brand, basis_type, basis_amount, basis_unit,
+                                       density_g_per_ml, source_release_id, locale)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            prepared.map {
+                arrayOf<Any?>(
+                    it.revisionId,
+                    it.foodId,
+                    it.revision,
+                    it.draft.name.trim(),
+                    it.draft.brand?.trim(),
+                    it.draft.basisType.name,
+                    it.draft.basisAmount,
+                    it.draft.basisUnit,
+                    it.draft.densityGPerMl,
+                    releaseId,
+                    it.imported.locale,
                 )
-            validateDraft(draft)
-            val current =
-                db.fetchOne(
-                    "select id, (select coalesce(max(revision), 0) from food_revisions where food_id = foods.id) as revision from foods where source_kind = ? and external_id = ? for update",
-                    source.name,
-                    imported.externalId,
-                )
-            val foodId = current?.get("id", UUID::class.java) ?: UUID.randomUUID()
-            val revision = (current?.get("revision", Int::class.java) ?: 0) + 1
-            if (current == null) {
-                db.execute(
-                    "insert into foods(id, source_kind, external_id, barcode, active) values (?, ?, ?, ?, true)",
-                    foodId,
-                    source.name,
-                    imported.externalId,
-                    normalizeBarcode(imported.barcode),
-                )
-            } else {
-                db.execute(
-                    "update foods set barcode = ?, active = true where id = ?",
-                    normalizeBarcode(imported.barcode),
-                    foodId,
-                )
-            }
-            insertRevision(foodId, UUID.randomUUID(), revision, draft, releaseId, imported.locale)
-            db.execute("delete from food_aliases where food_id = ?", foodId)
-            imported.aliases.forEach { (locale, name) ->
-                if (locale.isNotBlank() && name.isNotBlank()) {
-                    db.execute(
-                        "insert into food_aliases(food_id, locale, name) values (?, ?, ?) on conflict do nothing",
-                        foodId,
-                        locale.trim(),
-                        name.trim(),
-                    )
+            },
+        )
+
+        val nutrients =
+            prepared.flatMap { food ->
+                food.draft.nutrients.map { (code, amount) ->
+                    arrayOf<Any?>(food.revisionId, code, amount)
                 }
             }
-        }
+        logger.info("Writing {} nutrient values", nutrients.size)
+        executeBatch(
+            "insert into food_nutrients(food_revision_id, nutrient_code, amount, value_kind) values (?, ?, ?, 'REPORTED')",
+            nutrients,
+        )
+        executeBatch(
+            """
+            insert into portions(id, food_revision_id, name, quantity, gram_weight, milliliter_volume, is_default)
+            values (?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            prepared.flatMap { food ->
+                food.draft.portions.map { portion ->
+                    arrayOf<Any?>(
+                        UUID.randomUUID(),
+                        food.revisionId,
+                        portion.name.trim(),
+                        portion.quantity,
+                        portion.gramWeight,
+                        portion.milliliterVolume,
+                        portion.default,
+                    )
+                }
+            },
+        )
+        db.execute("delete from food_aliases where food_id in (select id from foods where source_kind = ?)", source.name)
+        executeBatch(
+            "insert into food_aliases(food_id, locale, name) values (?, ?, ?) on conflict do nothing",
+            prepared.flatMap { food ->
+                food.imported.aliases.mapNotNull { (locale, name) ->
+                    if (locale.isBlank() || name.isBlank()) null else arrayOf<Any?>(food.foodId, locale.trim(), name.trim())
+                }
+            },
+        )
         db.execute(
             "update food_source_releases set status = 'COMPLETED', record_count = ?, imported_at = current_timestamp where id = ?",
             foods.size,
             releaseId,
         )
+        logger.info("Completed {} {} with {} foods", source, releaseKey, foods.size)
         return CatalogImportResult(source, releaseKey, foods.size, false)
+    }
+
+    private fun ImportedFood.toDraft() =
+        FoodDraft(
+            name,
+            brand,
+            barcode,
+            basisType,
+            basisAmount,
+            basisUnit,
+            densityGPerMl,
+            nutrients,
+            portions,
+        )
+
+    private fun executeBatch(
+        sql: String,
+        bindings: List<Array<out Any?>>,
+    ) {
+        bindings.chunked(BATCH_SIZE).forEach { chunk ->
+            db.batch(sql, *chunk.toTypedArray()).execute()
+        }
     }
 
     private fun insertRevision(
@@ -422,4 +512,23 @@ internal class JooqCatalogRepository(
     }
 
     private fun normalizeBarcode(barcode: String?): String? = barcode?.filter(Char::isDigit)?.takeIf { it.isNotBlank() }
+
+    private data class ExistingImportedFood(
+        val id: UUID,
+        val revision: Int,
+    )
+
+    private data class PreparedImportedFood(
+        val imported: ImportedFood,
+        val draft: FoodDraft,
+        val foodId: UUID,
+        val revisionId: UUID,
+        val revision: Int,
+        val existing: Boolean,
+    )
+
+    private companion object {
+        const val BATCH_SIZE = 1_000
+        val logger = LoggerFactory.getLogger(JooqCatalogRepository::class.java)
+    }
 }

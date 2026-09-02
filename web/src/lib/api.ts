@@ -240,6 +240,7 @@ export const queryKeys = {
     goals: ['goals'] as const,
     resolvedGoals: (from: string, to = from) => ['resolved-goals', from, to] as const,
     diary: (date: string) => ['diary', date] as const,
+    diaryRange: (from: string, to: string) => ['diary', 'range', from, to] as const,
     foods: (query: string) => ['foods', query] as const,
     trackables: (query: string, type = 'ALL') => ['trackables', query, type] as const,
     lastTrackedAmount: (type: Trackable['type'], revisionId: string) =>

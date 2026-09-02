@@ -1,77 +1,69 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, CalendarCheck, ChevronLeft, ChevronRight, Flame, Utensils } from 'lucide-react'
+import {
+    ArrowRight,
+    CalendarCheck,
+    ChevronLeft,
+    ChevronRight,
+    Flame,
+    NotebookTabs,
+    Scale,
+    Utensils,
+} from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { NutrientFacts, Progress } from '../components/nutrition'
-import {
-    Button,
-    Card,
-    ErrorPanel,
-    PageHeader,
-    SectionHeader,
-    Skeleton,
-    StatePanel,
-} from '../components/ui'
+import { Button, Card, ErrorPanel, SectionHeader, Skeleton, StatePanel } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber, kcal, round, today } from '../lib/utils'
-import type { DiaryDay, ResolvedGoal } from '../types'
+import { formatNumber, kcal, today, localDate as toLocalDate } from '../lib/utils'
+import type { DiaryDay, ResolvedGoal, Weight } from '../types'
 
-const primary = [
-    { code: 'energy_kcal', label: 'Calories', unit: 'kcal', color: 'orange' },
-    { code: 'protein_g', label: 'Protein', unit: 'g', color: 'green' },
-    { code: 'carbohydrate_g', label: 'Carbs', unit: 'g', color: 'orange' },
+const nutrients = [
+    { code: 'protein_g', label: 'Protein', unit: 'g', color: 'orange' },
     { code: 'fat_g', label: 'Fat', unit: 'g', color: 'teal' },
+    { code: 'carbohydrate_g', label: 'Carbs', unit: 'g', color: 'green' },
 ] as const
 
 export function DashboardPage() {
     const [params, setParams] = useSearchParams()
     const selected = params.get('date') || today()
     const [mode, setMode] = useState<'consumed' | 'remaining'>('consumed')
-    const week = useMemo(() => weekFor(selected), [selected])
+    const activityFrom = useMemo(() => addDays(selected, -29), [selected])
     const days = useQuery({
-        queryKey: ['diary-week', week.from, week.to],
-        queryFn: () => api.diaryRange(week.from, week.to),
+        queryKey: queryKeys.diaryRange(activityFrom, selected),
+        queryFn: () => api.diaryRange(activityFrom, selected),
     })
     const goals = useQuery({
-        queryKey: queryKeys.resolvedGoals(week.from, week.to),
-        queryFn: () => api.resolvedGoals(week.from, week.to),
+        queryKey: queryKeys.resolvedGoals(selected),
+        queryFn: () => api.resolvedGoals(selected),
     })
-    const targets = useQuery({
-        queryKey: queryKeys.targets,
-        queryFn: api.targets,
+    const weights = useQuery({
+        queryKey: queryKeys.weights,
+        queryFn: () => api.weights(500),
     })
-    const definitions = useQuery({
-        queryKey: queryKeys.nutrients,
-        queryFn: api.nutrients,
-    })
+    const targets = useQuery({ queryKey: queryKeys.targets, queryFn: api.targets })
+    const definitions = useQuery({ queryKey: queryKeys.nutrients, queryFn: api.nutrients })
     const coaching = useQuery({ queryKey: queryKeys.coachingStatus, queryFn: api.coachingStatus })
     const day = days.data?.find((item) => item.date === selected)
     const goal = goals.data?.find((item) => item.date === selected)
     const targetMap = resolvedTargetMap(goal, targets.data)
-    const moveWeek = (amount: number) => setParams({ date: addDays(selected, amount * 7) })
+    const moveDay = (amount: number) => setParams({ date: addDays(selected, amount) })
 
     return (
         <>
-            <PageHeader
-                eyebrow="YOUR WEEK"
-                title={selected === today() ? 'Today' : formatDay(selected)}
-                description="One day at a time. The whole week stays in view."
-                actions={
-                    <div className="date-switcher">
-                        <Button
-                            variant="ghost"
-                            aria-label="Previous week"
-                            onClick={() => moveWeek(-1)}
-                        >
-                            <ChevronLeft />
-                        </Button>
-                        <span>{formatRange(week.from, week.to)}</span>
-                        <Button variant="ghost" aria-label="Next week" onClick={() => moveWeek(1)}>
-                            <ChevronRight />
-                        </Button>
-                    </div>
-                }
-            />
+            <header className="dashboard-header">
+                <div>
+                    <p className="eyebrow">{formatDay(selected)}</p>
+                    <h1>Dashboard</h1>
+                    <p>A clear nutrition view, backed by the habits that move you forward.</p>
+                </div>
+                <DateNavigator
+                    selected={selected}
+                    onPrevious={() => moveDay(-1)}
+                    onNext={() => moveDay(1)}
+                    onSelect={(date) => setParams({ date })}
+                />
+            </header>
+
             {coaching.data?.checkInDue && (
                 <Card className="checkin-callout" tone="orange">
                     <CalendarCheck />
@@ -86,52 +78,53 @@ export function DashboardPage() {
                     </Link>
                 </Card>
             )}
+
             {days.isLoading || goals.isLoading ? (
-                <Skeleton lines={6} />
+                <Skeleton lines={7} />
             ) : days.error || goals.error ? (
                 <ErrorPanel error={days.error || goals.error} />
             ) : (
                 <>
-                    <WeekOverview
-                        days={days.data || []}
-                        goals={goals.data || []}
-                        nutrientTargets={targets.data}
-                        selected={selected}
-                        onSelect={(date) => setParams({ date })}
-                    />
-                    <fieldset className="macro-mode">
-                        <legend className="sr-only">Nutrient display</legend>
-                        <button
-                            type="button"
-                            className={mode === 'consumed' ? 'active' : ''}
-                            onClick={() => setMode('consumed')}
-                        >
-                            Consumed
-                        </button>
-                        <button
-                            type="button"
-                            className={mode === 'remaining' ? 'active' : ''}
-                            onClick={() => setMode('remaining')}
-                        >
-                            Remaining
-                        </button>
-                    </fieldset>
-                    <div className="daily-macros">
-                        {primary.map((item) => (
-                            <MacroCard
-                                key={item.code}
-                                item={item}
-                                consumed={day?.totals[item.code] || 0}
-                                target={targetMap[item.code]}
-                                mode={mode}
-                            />
-                        ))}
-                    </div>
+                    <DailyNutrition day={day} targets={targetMap} mode={mode} onMode={setMode} />
                     {goal?.warnings.map((warning) => (
                         <p className="goal-warning" key={warning}>
                             {warning} <Link to="/profile#nutrition-goals">Review goals</Link>
                         </p>
                     ))}
+
+                    <section className="dashboard-habits" aria-labelledby="dashboard-habits-title">
+                        <header className="section-header">
+                            <div>
+                                <p className="eyebrow">CONSISTENCY</p>
+                                <h2 id="dashboard-habits-title">Habits</h2>
+                            </div>
+                        </header>
+                        {weights.isLoading ? (
+                            <Skeleton lines={4} />
+                        ) : weights.error ? (
+                            <ErrorPanel error={weights.error} />
+                        ) : (
+                            <div className="habit-grid">
+                                <HabitCard
+                                    title="Weigh-in"
+                                    icon={Scale}
+                                    color="green"
+                                    selected={selected}
+                                    activeDates={weightDates(weights.data || [])}
+                                    to="/progress"
+                                />
+                                <HabitCard
+                                    title="Food logging"
+                                    icon={NotebookTabs}
+                                    color="orange"
+                                    selected={selected}
+                                    activeDates={foodLogDates(days.data || [])}
+                                    to={`/food-log?date=${selected}`}
+                                />
+                            </div>
+                        )}
+                    </section>
+
                     <div className="dashboard-app-grid">
                         <Card>
                             <SectionHeader
@@ -215,131 +208,224 @@ export function DashboardPage() {
     )
 }
 
-function WeekOverview({
-    days,
-    goals,
-    nutrientTargets,
+function DateNavigator({
     selected,
+    onPrevious,
+    onNext,
     onSelect,
 }: {
-    days: DiaryDay[]
-    goals: ResolvedGoal[]
-    nutrientTargets?: Array<{ nutrientCode: string; targetAmount?: number }>
     selected: string
+    onPrevious: () => void
+    onNext: () => void
     onSelect: (date: string) => void
 }) {
-    const selectedDay = days.find((day) => day.date === selected)
-    const selectedGoal = goals.find((goal) => goal.date === selected)
-    const selectedTargets = resolvedTargetMap(selectedGoal, nutrientTargets)
     return (
-        <Card className="week-overview">
-            <fieldset className="week-chart">
-                <legend className="sr-only">Weekly nutrition overview</legend>
-                {days.map((day) => {
-                    const goal = goals.find((item) => item.date === day.date)
-                    const dayTargets = resolvedTargetMap(goal, nutrientTargets)
-                    const isToday = day.date === today()
+        <div className="dashboard-date-navigation">
+            <Button variant="ghost" aria-label="Previous day" onClick={onPrevious}>
+                <ChevronLeft />
+            </Button>
+            <label>
+                <span className="sr-only">Dashboard date</span>
+                <input
+                    type="date"
+                    value={selected}
+                    onChange={(event) => onSelect(event.target.value)}
+                    aria-label="Dashboard date"
+                />
+            </label>
+            <Button variant="ghost" aria-label="Next day" onClick={onNext}>
+                <ChevronRight />
+            </Button>
+            {selected !== today() && (
+                <button className="dashboard-today" type="button" onClick={() => onSelect(today())}>
+                    Today
+                </button>
+            )}
+        </div>
+    )
+}
+
+function DailyNutrition({
+    day,
+    targets,
+    mode,
+    onMode,
+}: {
+    day?: DiaryDay
+    targets: Record<string, number>
+    mode: 'consumed' | 'remaining'
+    onMode: (mode: 'consumed' | 'remaining') => void
+}) {
+    const consumedEnergy = day?.totals.energy_kcal || 0
+    const energyTarget = targets.energy_kcal
+    const energyDifference = energyTarget == null ? undefined : energyTarget - consumedEnergy
+    const remainingEnergy = energyDifference == null ? undefined : Math.max(0, energyDifference)
+    const shownEnergy = mode === 'consumed' ? consumedEnergy : remainingEnergy
+    const progress = energyTarget ? Math.min(1, consumedEnergy / energyTarget) : 0
+    const circumference = 2 * Math.PI * 44
+
+    return (
+        <Card className="daily-nutrition-card">
+            <SectionHeader eyebrow="DAILY TOTAL" title="Daily nutrition" />
+            <div className="energy-summary">
+                <div className="energy-side-stat">
+                    <strong>
+                        {formatNumber(mode === 'consumed' ? remainingEnergy : consumedEnergy)}
+                    </strong>
+                    <span>{mode === 'consumed' ? 'Remaining' : 'Consumed'}</span>
+                </div>
+                <div className="energy-ring">
+                    <svg
+                        viewBox="0 0 100 100"
+                        role="img"
+                        aria-label={
+                            energyTarget
+                                ? `${formatNumber(consumedEnergy)} of ${formatNumber(energyTarget)} calories consumed`
+                                : `${formatNumber(consumedEnergy)} calories consumed; no target set`
+                        }
+                    >
+                        <circle className="energy-ring-track" cx="50" cy="50" r="44" />
+                        <circle
+                            className="energy-ring-value"
+                            cx="50"
+                            cy="50"
+                            r="44"
+                            style={{
+                                strokeDasharray: circumference,
+                                strokeDashoffset: circumference * (1 - progress),
+                            }}
+                        />
+                    </svg>
+                    <div>
+                        <strong>{shownEnergy == null ? '—' : formatNumber(shownEnergy)}</strong>
+                        <span>{mode === 'consumed' ? 'Consumed' : 'Remaining'}</span>
+                        {energyDifference != null && energyDifference < 0 && (
+                            <em>{formatNumber(Math.abs(energyDifference))} over</em>
+                        )}
+                    </div>
+                </div>
+                <div className="energy-side-stat">
+                    <strong>{formatNumber(energyTarget)}</strong>
+                    <span>Target</span>
+                    {energyTarget == null && <Link to="/profile#nutrition-goals">Set goal</Link>}
+                </div>
+            </div>
+            <div className="daily-nutrient-bars">
+                {nutrients.map((item) => {
+                    const consumed = day?.totals[item.code] || 0
+                    const target = targets[item.code]
+                    const difference = target == null ? undefined : target - consumed
+                    const shown =
+                        mode === 'consumed'
+                            ? consumed
+                            : difference == null
+                              ? undefined
+                              : Math.max(0, difference)
                     return (
-                        <button
-                            type="button"
-                            key={day.date}
-                            className={`${day.date === selected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
-                            onClick={() => onSelect(day.date)}
-                            aria-pressed={day.date === selected}
-                            aria-label={`${formatDay(day.date)}, ${kcal(day.totals)} calories`}
+                        <div
+                            className={`daily-nutrient daily-nutrient--${item.color}`}
+                            key={item.code}
                         >
-                            <div className="week-bars" aria-hidden="true">
-                                {primary.map((item) => {
-                                    const consumed = day.totals[item.code] || 0
-                                    const target = dayTargets[item.code]
-                                    const percent = target
-                                        ? Math.min(100, (consumed / target) * 100)
-                                        : 0
-                                    return (
-                                        <span
-                                            className={`week-bar week-bar--${item.color}`}
-                                            key={item.code}
-                                        >
-                                            <i style={{ height: `${percent}%` }} />
-                                        </span>
-                                    )
-                                })}
-                            </div>
-                            <small>
-                                {new Intl.DateTimeFormat(undefined, { weekday: 'narrow' }).format(
-                                    localDate(day.date),
-                                )}
-                            </small>
-                            <b>{Number(day.date.slice(-2))}</b>
-                        </button>
-                    )
-                })}
-            </fieldset>
-            <div className="week-targets">
-                <p>{selected === today() ? 'Today' : formatDay(selected)}</p>
-                {primary.map((item) => {
-                    const consumed = selectedDay?.totals[item.code] || 0
-                    const target = selectedTargets[item.code]
-                    return (
-                        <div key={item.code}>
-                            <span className={`target-swatch target-swatch--${item.color}`} />
                             <span>{item.label}</span>
-                            <strong>{formatNumber(consumed)}</strong>
                             {target == null ? (
-                                <Link to="/profile#nutrition-goals">Set target</Link>
+                                <Link to="/profile#nutrition-goals">Set goal</Link>
                             ) : (
-                                <b>
-                                    / {formatNumber(target)} {item.unit}
-                                </b>
+                                <>
+                                    <Progress value={consumed} max={target} color={item.color} />
+                                    <b>
+                                        {formatNumber(shown)} / {formatNumber(target)} {item.unit}
+                                    </b>
+                                    {difference != null && difference < 0 && (
+                                        <em>
+                                            {formatNumber(Math.abs(difference), item.unit)} over
+                                        </em>
+                                    )}
+                                </>
                             )}
                         </div>
                     )
                 })}
             </div>
+            <fieldset className="macro-mode daily-nutrition-mode">
+                <legend className="sr-only">Nutrient display</legend>
+                <button
+                    type="button"
+                    className={mode === 'consumed' ? 'active' : ''}
+                    onClick={() => onMode('consumed')}
+                >
+                    Consumed
+                </button>
+                <button
+                    type="button"
+                    className={mode === 'remaining' ? 'active' : ''}
+                    onClick={() => onMode('remaining')}
+                >
+                    Remaining
+                </button>
+            </fieldset>
         </Card>
     )
 }
 
-function MacroCard({
-    item,
-    consumed,
-    target,
-    mode,
+function HabitCard({
+    title,
+    icon: Icon,
+    color,
+    selected,
+    activeDates,
+    to,
 }: {
-    item: (typeof primary)[number]
-    consumed: number
-    target?: number
-    mode: 'consumed' | 'remaining'
+    title: string
+    icon: typeof Scale
+    color: 'green' | 'orange'
+    selected: string
+    activeDates: Set<string>
+    to: string
 }) {
-    const difference = target == null ? undefined : target - consumed
-    const shown =
-        mode === 'consumed' ? consumed : difference == null ? undefined : Math.max(0, difference)
+    const dates = Array.from({ length: 30 }, (_, index) => addDays(selected, index - 29))
+    const weekStart = startOfWeek(selected)
+    const completedThisWeek = dates.filter(
+        (date) => date >= weekStart && date <= selected && activeDates.has(date),
+    ).length
     return (
-        <Card className={`dashboard-macro dashboard-macro--${item.color}`}>
-            <span>{item.label}</span>
-            <strong>{shown == null ? '—' : formatNumber(shown)}</strong>
-            <small>
-                {shown == null ? <Link to="/profile#nutrition-goals">Set goal</Link> : item.unit}
-            </small>
-            {target != null && (
-                <>
-                    <Progress value={consumed} max={target} color={item.color} />
-                    <p className="macro-target-reading">
-                        <span>{round(consumed)} of</span>
-                        <strong>
-                            {round(target)} {item.unit}
-                        </strong>
-                        <small>target</small>
-                    </p>
-                    {difference != null && difference < 0 && (
-                        <em>
-                            {round(Math.abs(difference))} {item.unit} over
-                        </em>
-                    )}
-                </>
-            )}
-        </Card>
+        <Link
+            className={`card habit-card habit-card--${color}`}
+            to={to}
+            aria-label={`${title}: ${completedThisWeek} of 7 days completed this week`}
+        >
+            <header>
+                <span>
+                    <Icon />
+                </span>
+                <div>
+                    <h3>{title}</h3>
+                    <p>Last 30 days</p>
+                </div>
+            </header>
+            <div className="habit-calendar" aria-hidden="true">
+                {dates.map((date) => (
+                    <i
+                        className={`${activeDates.has(date) ? 'complete' : ''} ${date === selected ? 'selected' : ''}`}
+                        key={date}
+                    />
+                ))}
+            </div>
+            <footer>
+                <span>
+                    <b>{completedThisWeek}/7</b> this week
+                </span>
+                <ChevronRight />
+            </footer>
+        </Link>
     )
+}
+
+function foodLogDates(days: DiaryDay[]) {
+    return new Set(days.filter((day) => day.entries.length > 0).map((day) => day.date))
+}
+
+function weightDates(weights: Weight[]) {
+    return new Set(weights.map((weight) => toLocalDate(new Date(weight.measuredAt))))
 }
 
 function resolvedTargetMap(
@@ -358,26 +444,22 @@ function resolvedTargetMap(
     return values
 }
 
-const localDate = (value: string) => new Date(`${value}T12:00:00`)
+const dateAtNoon = (value: string) => new Date(`${value}T12:00:00`)
 const addDays = (value: string, amount: number) => {
-    const date = localDate(value)
+    const date = dateAtNoon(value)
     date.setDate(date.getDate() + amount)
-    return date.toISOString().slice(0, 10)
+    return toLocalDate(date)
 }
-const weekFor = (value: string) => {
-    const date = localDate(value)
-    const offset = (date.getDay() + 6) % 7
-    const from = addDays(value, -offset)
-    return { from, to: addDays(from, 6) }
+const startOfWeek = (value: string) => {
+    const date = dateAtNoon(value)
+    return addDays(value, -((date.getDay() + 6) % 7))
 }
 const formatDay = (value: string) =>
     new Intl.DateTimeFormat(undefined, {
         weekday: 'long',
         day: 'numeric',
         month: 'long',
-    }).format(localDate(value))
-const formatRange = (from: string, to: string) =>
-    `${new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(localDate(from))} – ${new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(localDate(to))}`
+    }).format(dateAtNoon(value))
 const formatTime = (value: string) =>
     new Intl.DateTimeFormat(undefined, {
         hour: '2-digit',

@@ -14,6 +14,7 @@ import {
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { Brand } from '../components/layout'
 import { Button, Field, Skeleton, StatePanel, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
 import { formatNumber, kcal, localDate, parseDecimal } from '../lib/utils'
@@ -63,19 +64,22 @@ export function TrackPage() {
                 aria-modal="true"
                 aria-labelledby="track-title"
             >
-                <header>
-                    <div>
+                <header className="track-sheet-header">
+                    <div className="track-sheet-brand-row">
+                        <Brand />
+                        <button
+                            type="button"
+                            className="sheet-close"
+                            onClick={close}
+                            aria-label="Close Track"
+                        >
+                            <X />
+                        </button>
+                    </div>
+                    <div className="track-sheet-title">
                         <p className="eyebrow">QUICK ACTION</p>
                         <h1 id="track-title">{selected ? 'Choose amount' : trackTitle(mode)}</h1>
                     </div>
-                    <button
-                        type="button"
-                        className="sheet-close"
-                        onClick={close}
-                        aria-label="Close Track"
-                    >
-                        <X />
-                    </button>
                 </header>
                 {selected ? (
                     <AmountForm
@@ -598,7 +602,7 @@ function QuickEntry({ onDone }: { onDone: () => void }) {
                 <input name="save" type="checkbox" />
                 Save for next time
             </label>
-            <Button className="span-2" type="submit" disabled={add.isPending}>
+            <Button className="span-2 track-primary-action" type="submit" disabled={add.isPending}>
                 {add.isPending ? 'Adding…' : 'Add to Food Log'}
             </Button>
         </form>
@@ -636,7 +640,7 @@ function WeightEntry({ onDone }: { onDone: () => void }) {
                 <input name="note" maxLength={500} placeholder="Optional" />
             </Field>
             <p className="track-now span-2">Measured now</p>
-            <Button className="span-2" type="submit" disabled={add.isPending}>
+            <Button className="span-2 track-primary-action" type="submit" disabled={add.isPending}>
                 {add.isPending ? 'Adding…' : 'Add weigh-in'}
             </Button>
         </form>

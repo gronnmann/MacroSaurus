@@ -39,11 +39,12 @@ a new dated goal/program revision. Dashboard exposes a Monday reminder when due;
 `/check-in` reviews missing or partial nutrition, offers a weigh-in, displays the
 new estimate with uncertainty, and requires explicit accept or skip.
 
-Dashboard requests the displayed week as a range and resolves goals for the
-same dates. Its seven-day chart keeps consumption and targets visible together.
-Food Log owns diary mutations and presents entries chronologically rather than
-grouping them into meals. Track opens on unified food/recipe search, with tabs for
-barcode acquisition, quick entry, and other tracking actions. Blank search also
+Dashboard requests a rolling 30-day diary window and the selected day's resolved
+goal. Its daily nutrition ring keeps consumed, remaining, and target values visible,
+while weigh-in and food-logging cards summarize distinct active days over the same
+window. Food Log owns diary mutations and presents entries chronologically rather
+than grouping them into meals. Track opens on unified food/recipe search, with tabs
+for barcode acquisition, quick entry, and other tracking actions. Blank search also
 shows recent results and time-of-day go-tos derived from diary history; new entries
 use the current instant.
 
@@ -92,7 +93,7 @@ Supabase Data API.
 
 ## PWA behavior
 
-`vite-plugin-pwa` precaches the application shell and branded assets. API calls
-are network-only, and offline writes are intentionally not queued. This avoids
-silently replaying diary or food changes without idempotency and conflict
-contracts on the backend.
+`vite-plugin-pwa` precaches the application shell and branded assets and exposes
+Dashboard, Track, and Food Log launch shortcuts. API calls are network-only, and
+offline writes are intentionally not queued. This avoids silently replaying diary
+or food changes without idempotency and conflict contracts on the backend.

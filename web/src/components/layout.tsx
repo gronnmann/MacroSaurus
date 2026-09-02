@@ -142,7 +142,9 @@ function AuthenticatedLayout() {
                     </header>
                     <OfflineBanner />
                     <main className="page">
-                        <Outlet />
+                        <div className="route-stage" key={location.pathname}>
+                            <RouteContent />
+                        </div>
                     </main>
                     <nav className="bottom-nav" aria-label="Mobile navigation">
                         {visibleNav.map((item) =>
@@ -170,6 +172,13 @@ function AuthenticatedLayout() {
             </div>
         </ToastProvider>
     )
+}
+
+function RouteContent() {
+    useEffect(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+    }, [])
+    return <Outlet />
 }
 
 function OfflineBanner() {

@@ -276,15 +276,19 @@ test.beforeEach(async ({ page }) => {
     await mockApi(page)
 })
 
-test('dashboard presents the week and consumed or remaining views', async ({ page }, testInfo) => {
+test('dashboard presents daily nutrition and real habit activity', async ({ page }, testInfo) => {
     await page.goto(`/dashboard?date=${date}`)
-    await expect(page.getByRole('heading', { name: 'Monday, August 17' })).toBeVisible()
-    await expect(page.locator('.week-chart > button')).toHaveCount(7)
-    const weeklyTargets = page.locator('.week-targets')
-    await expect(weeklyTargets.getByText('1,840', { exact: true })).toBeVisible()
-    await expect(weeklyTargets.getByText('/ 2,200 kcal', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Daily nutrition' })).toBeVisible()
+    await expect(page.getByLabel('Dashboard date')).toHaveValue(date)
+    await expect(page.getByRole('img', { name: /1,840 of 2,200 calories consumed/ })).toBeVisible()
+    await expect(page.getByRole('link', { name: /Weigh-in: 1 of 7/ })).toBeVisible()
+    await expect(page.getByRole('link', { name: /Food logging: 1 of 7/ })).toBeVisible()
+    await expect(page.locator('.habit-calendar i')).toHaveCount(60)
+    await expect(page.locator('.habit-card--green .habit-calendar i.complete')).toHaveCount(1)
+    await expect(page.locator('.habit-card--orange .habit-calendar i.complete')).toHaveCount(1)
     await page.getByRole('button', { name: 'Remaining' }).click()
-    await expect(page.getByText('360', { exact: true })).toBeVisible()
+    await expect(page.locator('.energy-ring').getByText('360', { exact: true })).toBeVisible()
     await expect(page.getByRole('link', { name: /View food log/ })).toBeVisible()
     await expect(page.getByText(/Open Food Facts|immutable|USDA seeded/)).toHaveCount(0)
     if (testInfo.project.name === 'desktop-chromium')
@@ -296,6 +300,9 @@ test('dashboard presents the week and consumed or remaining views', async ({ pag
 
 test('Track logs at the current time and includes weigh-ins', async ({ page }) => {
     await page.goto('/track')
+    await expect(
+        page.getByRole('dialog').getByRole('link', { name: 'Macrosaurus dashboard' }),
+    ).toBeVisible()
     await page.getByRole('tab', { name: 'Quick Add' }).click()
     await expect(page.getByText('Logged at the current date and time')).toBeVisible()
     await expect(page.getByLabel('Date', { exact: true })).toHaveCount(0)
@@ -487,7 +494,7 @@ test('label photo appears only after an unmatched barcode', async ({ page }) => 
 test('mobile layout has the raised centered Track action', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'mobile-only assertion')
     await page.goto(`/dashboard?date=${date}`)
-    await expect(page.getByRole('heading', { name: 'Monday, August 17' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
     const navigation = page.getByRole('navigation', {
         name: 'Mobile navigation',
     })
@@ -495,6 +502,9 @@ test('mobile layout has the raised centered Track action', async ({ page }, test
     await expect(navigation.getByRole('link', { name: 'Track' })).toBeVisible()
     await expect(navigation.getByRole('link', { name: 'Food Log' })).toBeVisible()
     await expect(navigation.getByRole('link', { name: 'Profile' })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+        page.viewportSize()?.width,
+    )
     await page.screenshot({
         path: testInfo.outputPath('dashboard-mobile.png'),
         fullPage: true,

@@ -129,8 +129,9 @@ curl --fail http://127.0.0.1:8080/
 ```
 
 Seed public food catalogs separately after the backend is healthy. This starts a
-non-web importer inside the running backend container and writes through the
-same transactional catalog service directly to PostgreSQL:
+short-lived importer inside the running backend container and writes through the
+same transactional catalog service directly to PostgreSQL. It binds a random
+internal port during startup but does not use the catalog HTTP API:
 
 ```bash
 ./scripts/seed.sh --source both

@@ -23,7 +23,7 @@ usage() {
 Usage: ./scripts/seed.sh [--source usda|matvaretabellen|both]
 
 Download, normalize, and directly import pinned food catalog releases through a
-non-web JVM process in the running production backend container. The imports
+short-lived JVM process in the running production backend container. The imports
 are idempotent when the source releases have not changed. The default source is
 both.
 
@@ -158,7 +158,7 @@ import_release() {
     echo "Importing $(basename "$release_file")..."
     docker exec -i "$backend_container" \
         java -jar /app/app.jar \
-        --spring.main.web-application-type=none \
+        --server.port=0 \
         --spring.main.banner-mode=off \
         --spring.flyway.enabled=false \
         --macrosaurus.catalog-import.enabled=true \

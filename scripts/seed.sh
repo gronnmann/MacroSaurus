@@ -100,7 +100,7 @@ docker run --rm --pull missing \
             json_name="${json_name%.zip}.json"
 
             echo "Downloading ${download_url}..."
-            wget -q --show-progress -O "${archive_name}.zip" "$download_url"
+            wget -O "${archive_name}.zip" "$download_url"
             if ! unzip -p "${archive_name}.zip" "$json_name" > "${archive_name}.json"; then
                 echo "Expected ${json_name} was not found in ${download_url}." >&2
                 exit 1

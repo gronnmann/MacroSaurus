@@ -9,6 +9,11 @@ import com.macrosaurus.catalog.FoodResolver
 import com.macrosaurus.catalog.PortionDraft
 import com.macrosaurus.catalog.SourceKind
 import com.macrosaurus.catalog.application.CatalogService
+import com.macrosaurus.goals.ProgramStyle
+import com.macrosaurus.goals.WeightGoalType
+import com.macrosaurus.goals.application.CoachingService
+import com.macrosaurus.goals.application.CoachingSetupDraft
+import com.macrosaurus.identity.FormulaSex
 import com.macrosaurus.measurements.application.AddWeightCommand
 import com.macrosaurus.measurements.application.MeasurementService
 import com.macrosaurus.recipes.application.RecipeIngredientCommand
@@ -19,6 +24,8 @@ import com.macrosaurus.sharing.application.CreateShareCommand
 import com.macrosaurus.sharing.application.ShareResourceType
 import com.macrosaurus.sharing.application.SharingService
 import com.macrosaurus.tracking.Meal
+import com.macrosaurus.tracking.NutritionDayReview
+import com.macrosaurus.tracking.NutritionDayStatus
 import com.macrosaurus.tracking.application.AddFoodEntryCommand
 import com.macrosaurus.tracking.application.TrackableType
 import com.macrosaurus.tracking.application.TrackingService
@@ -54,6 +61,8 @@ class BackendPersistenceIT {
     @Autowired private lateinit var measurements: MeasurementService
 
     @Autowired private lateinit var sharing: SharingService
+
+    @Autowired private lateinit var coaching: CoachingService
 
     @Test
     fun `food recipe diary measurement and sharing flows retain snapshots and ownership`() {
@@ -203,5 +212,45 @@ class BackendPersistenceIT {
         assertThat(tracking.trackables(userId, "", TrackableType.FOOD, 30).first().id).isEqualTo(revised.id)
         assertThat(tracking.lastTrackedAmount(userId, TrackableType.FOOD, revised.revisionId)?.quantity)
             .isEqualByComparingTo("2")
+    }
+
+    @Test
+    fun `guided setup persists a versioned program and reviewed nutrition state`() {
+        val userId = "coaching-integration-user"
+        val status =
+            coaching.complete(
+                userId,
+                CoachingSetupDraft(
+                    currentStep = 5,
+                    displayName = "Integration athlete",
+                    locale = "en-NO",
+                    timezone = "Europe/Oslo",
+                    birthDate = LocalDate.of(1990, 5, 10),
+                    heightCm = BigDecimal("178"),
+                    formulaSex = FormulaSex.MALE,
+                    activityMultiplier = BigDecimal("1.55"),
+                    weightKg = BigDecimal("80"),
+                    goalType = WeightGoalType.LOSS,
+                    targetWeightKg = BigDecimal("75"),
+                    weeklyRatePercent = BigDecimal("0.5"),
+                    programStyle = ProgramStyle.COACHED,
+                    proteinGPerKg = BigDecimal("1.8"),
+                    fatEnergyPercent = BigDecimal("25"),
+                ),
+            )
+
+        assertThat(status.setupComplete).isTrue()
+        assertThat(status.goal?.type).isEqualTo(WeightGoalType.LOSS)
+        assertThat(status.program?.style).isEqualTo(ProgramStyle.COACHED)
+        assertThat(status.program?.energyKcal).isPositive()
+
+        val reviewDate = LocalDate.now().minusDays(1)
+        tracking.saveReview(
+            userId,
+            NutritionDayReview(reviewDate, NutritionDayStatus.ESTIMATED_TOTAL, BigDecimal("2100")),
+        )
+        val analyzed = tracking.dailyNutrition(userId, reviewDate, reviewDate).single()
+        assertThat(analyzed.analysisEnergyKcal).isEqualByComparingTo("2100")
+        assertThat(analyzed.analysisWeight).isEqualByComparingTo("0.5")
     }
 }

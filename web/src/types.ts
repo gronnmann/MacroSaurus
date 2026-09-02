@@ -209,7 +209,7 @@ export interface NutritionProgram {
     expenditureLowerKcal?: number
     expenditureUpperKcal?: number
     algorithmVersion?: string
-    source: 'ONBOARDING' | 'CHECK_IN' | 'PROFILE_RERUN' | 'LEGACY' | 'MANUAL_API'
+    source: 'ONBOARDING' | 'CHECK_IN' | 'PROFILE_RERUN'
 }
 
 export interface CoachingStatus {

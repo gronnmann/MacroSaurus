@@ -10,7 +10,7 @@ enum class GoalStatus { ACTIVE, COMPLETED, ARCHIVED }
 
 enum class ProgramStyle { COACHED, MANUAL }
 
-enum class ProgramSource { ONBOARDING, CHECK_IN, PROFILE_RERUN, LEGACY, MANUAL_API }
+enum class ProgramSource { ONBOARDING, CHECK_IN, PROFILE_RERUN }
 
 data class WeightGoalSnapshot(
     val id: UUID,

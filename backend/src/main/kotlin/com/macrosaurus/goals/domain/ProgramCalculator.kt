@@ -43,6 +43,9 @@ internal object ProgramCalculator {
         previousEnergyKcal: BigDecimal? = null,
         recurringCheckIn: Boolean = false,
     ): ProgramCalculation {
+        if (inputs.weightKg !in BigDecimal("10")..BigDecimal("700")) {
+            throw InvalidOperationException("Weight must be between 10 and 700 kg")
+        }
         if (inputs.style == ProgramStyle.MANUAL) return manual(inputs)
         validateGoal(inputs)
         val expenditure = estimate.suggestedKcal ?: throw InvalidOperationException("A starting expenditure estimate is required")
@@ -127,6 +130,9 @@ internal object ProgramCalculator {
         }
         if (inputs.goalType == WeightGoalType.GAIN && (inputs.targetWeightKg == null || inputs.targetWeightKg <= inputs.weightKg)) {
             throw InvalidOperationException("A gain target must be above the current weight")
+        }
+        if (inputs.targetWeightKg != null && inputs.targetWeightKg !in BigDecimal("10")..BigDecimal("700")) {
+            throw InvalidOperationException("Target weight must be between 10 and 700 kg")
         }
         if (inputs.proteinGPerKg !in BigDecimal("1.2")..BigDecimal("2.2")) throw InvalidOperationException("Protein must be between 1.2 and 2.2 g/kg")
         if (inputs.fatEnergyPercent !in BigDecimal("20")..BigDecimal("40")) throw InvalidOperationException("Fat must be between 20% and 40%")

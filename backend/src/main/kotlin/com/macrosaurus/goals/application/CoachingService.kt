@@ -317,10 +317,15 @@ internal class CoachingService(
         draft: CoachingSetupDraft,
         userId: String,
     ): ProfileSnapshot {
+        runCatching { ZoneId.of(draft.timezone) }
+            .getOrElse { throw InvalidOperationException("Unknown profile timezone") }
         val date = today(draft.timezone)
         val birthDate = draft.birthDate ?: throw InvalidOperationException("Birth date is required")
         if (Period.between(birthDate, date).years < 18) throw InvalidOperationException("Macrosaurus coaching is available to adults aged 18 and over")
         val displayName = draft.displayName?.trim()?.takeIf { it.isNotBlank() } ?: throw InvalidOperationException("Display name is required")
+        val height = draft.heightCm ?: throw InvalidOperationException("Height is required")
+        if (height !in BigDecimal("30")..BigDecimal("300")) throw InvalidOperationException("Height must be between 30 and 300 cm")
+        if (draft.activityMultiplier !in BigDecimal("1.0")..BigDecimal("3.0")) throw InvalidOperationException("Activity multiplier must be between 1.0 and 3.0")
         return ProfileSnapshot(
             userId,
             displayName,
@@ -328,7 +333,7 @@ internal class CoachingService(
             draft.timezone,
             UnitSystem.METRIC,
             birthDate,
-            draft.heightCm ?: throw InvalidOperationException("Height is required"),
+            height,
             draft.formulaSex ?: throw InvalidOperationException("Formula sex is required for the starting estimate"),
             draft.activityMultiplier,
         )

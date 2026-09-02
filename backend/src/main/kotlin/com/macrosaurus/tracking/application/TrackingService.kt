@@ -403,9 +403,9 @@ internal class TrackingService(
             throw InvalidOperationException("Choose a review outcome")
         }
         if (review.status == NutritionDayStatus.ESTIMATED_TOTAL &&
-            (review.estimatedTotalKcal == null || review.estimatedTotalKcal < BigDecimal.ZERO)
+            (review.estimatedTotalKcal == null || review.estimatedTotalKcal <= BigDecimal.ZERO)
         ) {
-            throw InvalidOperationException("Estimated total calories must be zero or greater")
+            throw InvalidOperationException("Estimated total calories must be greater than zero; use intentional fasting for a zero-calorie day")
         }
         val normalized =
             if (review.status == NutritionDayStatus.ESTIMATED_TOTAL) review else review.copy(estimatedTotalKcal = null)

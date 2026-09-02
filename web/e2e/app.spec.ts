@@ -316,7 +316,7 @@ test('center Track action searches foods and recipes together', async ({ page })
 
 test('Food Log exposes edit, copy, custom date, and delete actions', async ({ page }) => {
     await page.goto(`/food-log?date=${date}`)
-    await expect(page.getByRole('heading', { name: 'Today’s timeline' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Monday, August 17' })).toBeVisible()
     await expect(
         page.getByRole('heading', { name: /Breakfast|Lunch|Dinner|Snack|Other/ }),
     ).toHaveCount(0)
@@ -326,6 +326,147 @@ test('Food Log exposes edit, copy, custom date, and delete actions', async ({ pa
     await expect(page.getByRole('button', { name: 'Copy to yesterday' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Choose date & time' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible()
+})
+
+test('a new account is guided through reload-safe goal setup', async ({ page }) => {
+    let setupComplete = false
+    const draft = {
+        currentStep: 1,
+        displayName: 'New Athlete',
+        locale: 'en-NO',
+        timezone: 'Europe/Oslo',
+        birthDate: '1990-05-10',
+        heightCm: 178,
+        formulaSex: 'MALE',
+        activityMultiplier: 1.55,
+        weightKg: 80,
+        goalType: 'MAINTAIN',
+        weeklyRatePercent: 0,
+        programStyle: 'COACHED',
+        proteinGPerKg: 1.6,
+        fatEnergyPercent: 25,
+    }
+    await page.route('**/api/v1/me/coaching/**', async (route) => {
+        const path = new URL(route.request().url()).pathname
+        if (path.endsWith('/status')) {
+            await route.fulfill({ json: { setupComplete, checkInDue: false } })
+        } else if (path.endsWith('/setup-draft/preview')) {
+            await route.fulfill({
+                json: {
+                    expenditure: {
+                        date,
+                        baselineKcal: 2380,
+                        suggestedKcal: 2380,
+                        lowerKcal: 1900,
+                        upperKcal: 2860,
+                        confidence: 'LOW',
+                        adaptiveEligible: false,
+                        algorithmVersion: 'energy-v2',
+                        explanation: [],
+                        requirements: {},
+                        modelState: 'BASELINE',
+                    },
+                    energyKcal: 2380,
+                    proteinG: 128,
+                    carbohydrateG: 318,
+                    fatG: 66,
+                    warnings: [],
+                },
+            })
+        } else if (path.endsWith('/setup-draft/complete')) {
+            setupComplete = true
+            await route.fulfill({ json: { setupComplete: true, checkInDue: false } })
+        } else if (route.request().method() === 'PUT') {
+            Object.assign(draft, route.request().postDataJSON())
+            await route.fulfill({ json: draft })
+        } else {
+            await route.fulfill({ json: draft })
+        }
+    })
+
+    await page.goto('/dashboard')
+    await expect(page).toHaveURL(/\/setup$/)
+    await expect(page.getByRole('heading', { name: 'Tell your coach about you' })).toBeVisible()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByRole('heading', { name: 'Where are you today?' })).toBeVisible()
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Where are you today?' })).toBeVisible()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByRole('heading', { name: 'Your first program' })).toBeVisible()
+    await page.getByRole('button', { name: 'Start my program' }).click()
+    await expect(page).toHaveURL(/\/dashboard$/)
+})
+
+test('weekly check-in reviews partial logging before accepting targets', async ({ page }) => {
+    let reviewed = false
+    let proposalReady = false
+    const checkIn = () => ({
+        due: true,
+        id: '11111111-1111-1111-1111-111111111111',
+        weekStart: '2026-08-24',
+        periodFrom: '2026-08-17',
+        periodTo: '2026-08-23',
+        status: 'DRAFT',
+        needsWeight: false,
+        candidates: [
+            {
+                date: '2026-08-20',
+                loggedEnergyKcal: 800,
+                entryCount: 2,
+                reason: 'POSSIBLE_PARTIAL',
+                review: reviewed ? { date: '2026-08-20', status: 'CONFIRMED_COMPLETE' } : undefined,
+            },
+        ],
+        proposal: proposalReady
+            ? {
+                  estimate: {
+                      date: '2026-08-23',
+                      baselineKcal: 2380,
+                      adaptiveKcal: 2450,
+                      suggestedKcal: 2420,
+                      lowerKcal: 2250,
+                      upperKcal: 2590,
+                      confidence: 'MEDIUM',
+                      adaptiveEligible: true,
+                      algorithmVersion: 'energy-v2',
+                      explanation: [],
+                      requirements: {},
+                      modelState: 'UPDATING',
+                  },
+                  previousEnergyKcal: 2200,
+                  proposedEnergyKcal: 2250,
+                  proposedProteinG: 160,
+                  proposedCarbohydrateG: 258,
+                  proposedFatG: 65,
+                  targetUpdateAvailable: true,
+                  warnings: [],
+              }
+            : undefined,
+    })
+    await page.route('**/api/v1/me/coaching/status', (route) =>
+        route.fulfill({ json: { setupComplete: true, checkInDue: true } }),
+    )
+    await page.route('**/api/v1/me/coaching/check-ins/**', async (route) => {
+        const path = new URL(route.request().url()).pathname
+        if (path.endsWith('/refresh')) proposalReady = true
+        await route.fulfill({ json: checkIn() })
+    })
+    await page.route('**/api/v1/diary-days/2026-08-20/analysis', async (route) => {
+        reviewed = true
+        await route.fulfill({
+            json: { date: '2026-08-20', ...route.request().postDataJSON() },
+        })
+    })
+
+    await page.goto('/check-in')
+    await expect(page.getByRole('heading', { name: 'Update your week' })).toBeVisible()
+    await page.getByRole('button', { name: 'That is complete' }).click()
+    await expect(page.getByText('CONFIRMED COMPLETE')).toBeVisible()
+    await page.getByRole('button', { name: 'Calculate update' }).click()
+    await expect(page.getByText('2,250 kcal')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Accept new targets' })).toBeEnabled()
 })
 
 test('label photo appears only after an unmatched barcode', async ({ page }) => {

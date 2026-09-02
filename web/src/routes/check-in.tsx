@@ -224,7 +224,7 @@ function ReviewDay({
                         <span>Estimated day total</span>
                         <input
                             type="number"
-                            min="0"
+                            min="1"
                             value={estimate}
                             onChange={(e) => setEstimate(Number(e.target.value))}
                         />

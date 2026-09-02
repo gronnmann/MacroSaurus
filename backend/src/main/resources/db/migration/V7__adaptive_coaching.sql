@@ -6,7 +6,7 @@ create table nutrition_day_reviews (
     updated_at timestamptz not null default current_timestamp,
     primary key(user_id, local_date),
     constraint nutrition_day_review_estimate check (
-        (status = 'ESTIMATED_TOTAL' and estimated_total_kcal is not null and estimated_total_kcal >= 0)
+        (status = 'ESTIMATED_TOTAL' and estimated_total_kcal is not null and estimated_total_kcal > 0)
         or (status <> 'ESTIMATED_TOTAL' and estimated_total_kcal is null)
     )
 );
@@ -43,32 +43,11 @@ create table nutrition_program_revisions (
     expenditure_upper_kcal numeric(12, 2),
     algorithm_version varchar(40),
     source varchar(24) not null,
-    legacy_settings jsonb,
     created_at timestamptz not null default current_timestamp,
     constraint nutrition_program_dates check (effective_to is null or effective_to >= effective_from)
 );
 create index nutrition_program_user_dates_idx on nutrition_program_revisions(user_id, effective_from desc);
 create unique index nutrition_program_one_active_idx on nutrition_program_revisions(user_id) where effective_to is null;
-
-insert into nutrition_program_revisions(
-    id, user_id, style, effective_from, source, legacy_settings
-)
-select gen_random_uuid(), user_id, 'MANUAL', updated_at::date, 'LEGACY',
-       jsonb_build_object(
-           'energyMode', energy_mode,
-           'energyValue', energy_value,
-           'macroMode', macro_mode,
-           'proteinGPerKg', protein_g_per_kg,
-           'fatEnergyPercent', fat_energy_percent,
-           'weightBasis', weight_basis,
-           'manualWeightKg', manual_weight_kg,
-           'proteinTargetG', protein_target_g,
-           'carbohydrateTargetG', carbohydrate_target_g,
-           'fatTargetG', fat_target_g,
-           'proteinEnergyPercent', protein_energy_percent,
-           'carbohydrateEnergyPercent', carbohydrate_energy_percent
-       )
-from user_goal_settings;
 
 create table coaching_setup_drafts (
     user_id varchar(160) primary key,

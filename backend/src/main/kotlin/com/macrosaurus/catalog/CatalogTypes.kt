@@ -1,6 +1,8 @@
 package com.macrosaurus.catalog
 
 import com.macrosaurus.shared.NutrientValues
+import java.io.InputStream
+import java.io.OutputStream
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -158,4 +160,11 @@ interface CatalogImporter {
         checksum: String,
         foods: List<ImportedFood>,
     ): CatalogImportResult
+}
+
+interface CatalogImportCommand {
+    fun execute(
+        input: InputStream,
+        output: OutputStream,
+    )
 }

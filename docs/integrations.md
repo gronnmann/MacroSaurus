@@ -7,19 +7,26 @@
 Migration `V2__seed_nutrients_and_foods.sql` includes three representative USDA
 foods and common nutrient definitions so the app works immediately.
 
-The explicit release importer accepts `USDA_FOUNDATION` and `USDA_SR_LEGACY`
-normalized releases at `POST /api/v1/admin/catalog-imports`. Use the Foundation
-April 2026 and SR Legacy April 2018 JSON downloads, excluding Branded and FNDDS
-data. On a production host, download, prepare, and import both USDA releases and
-Matvaretabellen in one idempotent operation (Node runs in a temporary container):
+The direct catalog importer accepts `USDA_FOUNDATION` and `USDA_SR_LEGACY`
+normalized releases. Use the Foundation April 2026 and SR Legacy April 2018 JSON
+downloads, excluding Branded and FNDDS data. On a production host, download,
+prepare, and import selected datasets independently of deployment:
 
 ```sh
-MACROSAURUS_TOKEN='your-admin-supabase-access-token' ./scripts/seed.sh
+./scripts/seed.sh --source usda
+./scripts/seed.sh --source matvaretabellen
+./scripts/seed.sh --source both
 ```
 
-The token must belong to a user listed in `ADMIN_USER_IDS`, and the production
-deployment must already be running. For manual preparation, extract the USDA
-archives and run:
+`both` is the default. USDA includes both Foundation and SR Legacy. The
+production backend container must already be running, but the operation is not
+part of deployment and does not need an application user or access token. The
+script downloads and normalizes data in a temporary Node container, then pipes
+one normalized release at a time into a non-web JVM process inside the running
+backend container. That process calls the transactional catalog service and
+PostgreSQL directly; it does not upload the release over HTTP.
+
+For manual preparation, extract the USDA archives and run:
 
 ```sh
 node scripts/prepare-catalog-release.mjs usda-foundation \
@@ -46,9 +53,9 @@ should still be shown in product and API surfaces.
 
 ## Matvaretabellen
 
-The same explicit endpoint accepts `MATVARETABELLEN` releases. The preparer
-downloads the official English and Norwegian Bokmål API exports together, keeps
-English as the display name, and adds the Bokmål name as a searchable alias:
+The same direct importer accepts `MATVARETABELLEN` releases. The preparer downloads
+the official English and Norwegian Bokmål API exports together, keeps English as
+the display name, and adds the Bokmål name as a searchable alias:
 
 ```sh
 node scripts/prepare-catalog-release.mjs matvaretabellen \
@@ -60,7 +67,7 @@ identifier as `externalId`, and computes a checksum over both raw exports. Keep
 the required Matvaretabellen attribution in deployments that redistribute the
 data.
 
-The request body is a normalized release:
+The importer input is a normalized release:
 
 ```json
 {
@@ -81,10 +88,10 @@ The request body is a normalized release:
 }
 ```
 
-Run a prepared release with `node scripts/import-catalog-release.mjs release.json`.
-The job uses `MACROSAURUS_API_URL` (default `http://localhost:8080/api/v1`) and
-either `MACROSAURUS_TOKEN` for production or `MACROSAURUS_USER_ID` for local
-development. Replaying the same source/release/checksum is idempotent.
+The seed script sends this JSON over stdin to `/app/app.jar` in catalog-import
+mode. Replaying the same source/release/checksum is idempotent. Each release is a
+separate transaction, so if a multi-source run stops partway through, rerun the
+same command: completed releases are skipped and the failed release is retried.
 
 ## Open Food Facts
 

@@ -10,6 +10,7 @@ import {
     Trash2,
 } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
+import { Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
     AppDialog,
@@ -147,50 +148,89 @@ export function FoodLogPage() {
                                         </span>
                                     </div>
                                     <strong>{kcal(entry.nutrients)} kcal</strong>
-                                    <details className="entry-menu">
-                                        <summary aria-label={`Actions for ${entry.displayName}`}>
+                                    <DialogTrigger>
+                                        <Button
+                                            variant="ghost"
+                                            className="entry-menu-trigger"
+                                            aria-label={`Actions for ${entry.displayName}`}
+                                        >
                                             <Ellipsis />
-                                        </summary>
-                                        <div>
-                                            <button type="button" onClick={() => setEditing(entry)}>
-                                                <Pencil />
-                                                Edit
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => quickCopy(entry, today())}
-                                            >
-                                                <Copy />
-                                                Copy to today
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    quickCopy(entry, addDays(today(), -1))
-                                                }
-                                            >
-                                                <Copy />
-                                                Copy to yesterday
-                                            </button>
-                                            <button type="button" onClick={() => setCopying(entry)}>
-                                                <CalendarPlus />
-                                                Choose date & time
-                                            </button>
-                                            <ConfirmDialog
-                                                title={`Delete ${entry.displayName}?`}
-                                                description="This removes the entry from your log."
-                                                danger
-                                                confirmLabel="Delete"
-                                                onConfirm={() => remove.mutate(entry.id)}
-                                                trigger={
-                                                    <Button variant="ghost" className="danger">
-                                                        <Trash2 />
-                                                        Delete
-                                                    </Button>
-                                                }
-                                            />
-                                        </div>
-                                    </details>
+                                        </Button>
+                                        <Popover
+                                            className="entry-menu-popover"
+                                            placement="bottom end"
+                                            offset={4}
+                                            containerPadding={12}
+                                        >
+                                            <Dialog className="entry-menu-dialog">
+                                                {({ close }) => (
+                                                    <>
+                                                        <Button
+                                                            variant="ghost"
+                                                            onPress={() => {
+                                                                close()
+                                                                setEditing(entry)
+                                                            }}
+                                                        >
+                                                            <Pencil />
+                                                            Edit
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            onPress={() => {
+                                                                close()
+                                                                quickCopy(entry, today())
+                                                            }}
+                                                        >
+                                                            <Copy />
+                                                            Copy to today
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            onPress={() => {
+                                                                close()
+                                                                quickCopy(
+                                                                    entry,
+                                                                    addDays(today(), -1),
+                                                                )
+                                                            }}
+                                                        >
+                                                            <Copy />
+                                                            Copy to yesterday
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            onPress={() => {
+                                                                close()
+                                                                setCopying(entry)
+                                                            }}
+                                                        >
+                                                            <CalendarPlus />
+                                                            Choose date & time
+                                                        </Button>
+                                                        <ConfirmDialog
+                                                            title={`Delete ${entry.displayName}?`}
+                                                            description="This removes the entry from your log."
+                                                            danger
+                                                            confirmLabel="Delete"
+                                                            onConfirm={() =>
+                                                                remove.mutate(entry.id)
+                                                            }
+                                                            trigger={
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    className="danger"
+                                                                >
+                                                                    <Trash2 />
+                                                                    Delete
+                                                                </Button>
+                                                            }
+                                                        />
+                                                    </>
+                                                )}
+                                            </Dialog>
+                                        </Popover>
+                                    </DialogTrigger>
                                 </article>
                             ))}
                     </div>

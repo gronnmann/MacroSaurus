@@ -262,6 +262,7 @@ async function mockApi(page: Page) {
                 formulaSex: 'MALE',
                 activityMultiplier: 1.55,
             }
+        else if (path === '/api/v1/admin/users') data = []
         else if (path.includes('/copies') || path === '/api/v1/diary-entries/entry-1') data = entry
         const noContent = method === 'DELETE' || path.endsWith('/last-amount')
         await route.fulfill({
@@ -325,7 +326,7 @@ test('center Track action searches foods and recipes together', async ({ page })
     await expect(page.getByRole('button', { name: 'Add to Food Log' })).toBeVisible()
 })
 
-test('Food Log exposes edit, copy, custom date, and delete actions', async ({ page }) => {
+test('Food Log exposes accessible actions above mobile navigation', async ({ page }, testInfo) => {
     await page.goto(`/food-log?date=${date}`)
     await expect(page.getByRole('heading', { name: 'Monday, August 17' })).toBeVisible()
     await expect(
@@ -337,6 +338,51 @@ test('Food Log exposes edit, copy, custom date, and delete actions', async ({ pa
     await expect(page.getByRole('button', { name: 'Copy to yesterday' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Choose date & time' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible()
+    const popover = page.locator('.entry-menu-popover')
+    const bounds = await popover.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds?.y).toBeGreaterThanOrEqual(0)
+    expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(
+        page.viewportSize()?.height ?? 0,
+    )
+    if (testInfo.project.name === 'mobile-chromium') {
+        expect(
+            Number(await popover.evaluate((element) => getComputedStyle(element).zIndex)),
+        ).toBeGreaterThan(70)
+    }
+    await page.getByRole('button', { name: 'Delete' }).click()
+    await expect(page.getByRole('heading', { name: 'Delete Banana, raw?' })).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await page.getByRole('button', { name: 'Edit' }).click()
+    await expect(page.getByRole('heading', { name: 'Edit Banana, raw' })).toBeVisible()
+})
+
+test('non-admin accounts do not receive an administration link', async ({ page }) => {
+    await page.goto('/profile')
+    await expect(page.getByRole('heading', { name: 'Macro Athlete' })).toBeVisible()
+    await expect(page.getByRole('link', { name: /Administration/ })).toHaveCount(0)
+})
+
+test('administration is linked from Account without adding navigation items', async ({ page }) => {
+    await page.route('**/api/v1/me/features', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                isAdmin: true,
+                aiLabelScan: { granted: true, available: true },
+            }),
+        })
+    })
+    await page.goto('/profile')
+
+    await expect(page.locator('.sidebar > nav > a')).toHaveCount(5)
+    await expect(page.locator('.bottom-nav > a')).toHaveCount(5)
+    await expect(page.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0)
+    const administration = page.getByRole('link', { name: /Administration/ })
+    await expect(administration).toBeVisible()
+    await administration.click()
+    await expect(page.getByRole('heading', { name: 'Feature access' })).toBeVisible()
 })
 
 test('a new account is guided through reload-safe goal setup', async ({ page }) => {

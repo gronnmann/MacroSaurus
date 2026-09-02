@@ -616,7 +616,7 @@
         color: var(--muted);
         font-size: 0.73rem;
     }
-    .entry-menu {
+    .entry-menu-trigger {
         grid-column: 4;
         grid-row: 1 / 3;
     }

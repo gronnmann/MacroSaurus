@@ -14,7 +14,7 @@ them through the deployment platform, or map them through an IDE run profile.
 | `DATABASE_PASSWORD` | `macrosaurus` | Yes | Yes | Database password |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Production | No | Comma-separated trusted web origins |
 | `SUPABASE_URL` | blank | Production | No | Project URL used to derive the Auth issuer and asymmetric JWKS |
-| `ADMIN_USER_IDS` | blank | For administration | No | Comma-separated trusted user UUIDs allowed to grant AI access and run catalog imports |
+| `ADMIN_USER_IDS` | blank | For administration | No | Comma-separated trusted user UUIDs allowed to grant AI feature access |
 | `OFF_BASE_URL` | `https://world.openfoodfacts.org` | No | No | Open Food Facts API base |
 | `OFF_USER_AGENT` | placeholder | Real OFF use | No | Identifies the app and contact address |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | No | No | OpenRouter API base |

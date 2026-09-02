@@ -128,6 +128,19 @@ docker compose --env-file .env.production -f compose.production.yml logs -f back
 curl --fail http://127.0.0.1:8080/
 ```
 
+Seed public food catalogs separately after the backend is healthy. This starts a
+non-web importer inside the running backend container and writes through the
+same transactional catalog service directly to PostgreSQL:
+
+```bash
+./scripts/seed.sh --source both
+```
+
+Use `usda` or `matvaretabellen` instead of `both` to update only that source.
+The command is idempotent for an unchanged release and does not require a user
+access token. See [Integrations](integrations.md) for release overrides and
+source-specific behavior.
+
 ## 6. Put HTTPS in front of the containers
 
 Create `/etc/nginx/sites-available/macrosaurus` on the host, replacing the

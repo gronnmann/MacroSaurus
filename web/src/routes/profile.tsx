@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarCheck, Dumbbell, LogOut, Settings, Target, UserRound } from 'lucide-react'
+import {
+    CalendarCheck,
+    Dumbbell,
+    LogOut,
+    Settings,
+    ShieldCheck,
+    Target,
+    UserRound,
+} from 'lucide-react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -23,6 +31,7 @@ export function ProfilePage() {
         queryFn: api.profile,
     })
     const coaching = useQuery({ queryKey: queryKeys.coachingStatus, queryFn: api.coachingStatus })
+    const features = useQuery({ queryKey: queryKeys.features, queryFn: api.features })
     const profileData = profile.data
     return (
         <>
@@ -42,7 +51,7 @@ export function ProfilePage() {
                 <ErrorPanel error={profile.error || coaching.error} />
             ) : (
                 <div className="profile-sections">
-                    <AccountForm profile={profileData} />
+                    <AccountForm profile={profileData} isAdmin={features.data?.isAdmin === true} />
                     <StrategyCard status={coaching.data} />
                     <section id="micronutrient-goals">
                         <SectionHeader
@@ -124,7 +133,13 @@ function StrategyCard({
     )
 }
 
-function AccountForm({ profile }: { profile: Awaited<ReturnType<typeof api.profile>> }) {
+function AccountForm({
+    profile,
+    isAdmin,
+}: {
+    profile: Awaited<ReturnType<typeof api.profile>>
+    isAdmin: boolean
+}) {
     const client = useQueryClient()
     const toast = useToast()
     const save = useMutation({
@@ -154,8 +169,8 @@ function AccountForm({ profile }: { profile: Awaited<ReturnType<typeof api.profi
         })
     }
     return (
-        <form id="account" onSubmit={submit}>
-            <Card>
+        <Card id="account">
+            <form onSubmit={submit}>
                 <SectionHeader eyebrow="ACCOUNT" title="About you" aside={<UserRound />} />
                 <div className="form-grid">
                     <Field label="Display name" className="span-2">
@@ -197,8 +212,17 @@ function AccountForm({ profile }: { profile: Awaited<ReturnType<typeof api.profi
                         {save.isPending ? 'Saving…' : 'Save profile'}
                     </Button>
                 </div>
-            </Card>
-        </form>
+            </form>
+            {isAdmin && (
+                <Link className="account-admin-link" to="/admin">
+                    <ShieldCheck />
+                    <span>
+                        <b>Administration</b>
+                        <small>Manage feature access</small>
+                    </span>
+                </Link>
+            )}
+        </Card>
     )
 }
 

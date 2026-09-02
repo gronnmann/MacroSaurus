@@ -20,17 +20,18 @@ readonly MATVARETABELLEN_NB_URL="${MATVARETABELLEN_NB_URL:-https://www.matvareta
 
 usage() {
     cat <<'EOF'
-Usage: MACROSAURUS_TOKEN='complete-admin-access-token' ./scripts/seed.sh
+Usage: ./scripts/seed.sh [--source usda|matvaretabellen|both]
 
-Download, normalize, and import the pinned USDA Foundation Foods, USDA SR
-Legacy, and Matvaretabellen releases into the running production deployment.
-The imports are idempotent when the source releases have not changed.
+Download, normalize, and directly import pinned food catalog releases through a
+non-web JVM process in the running production backend container. The imports
+are idempotent when the source releases have not changed. The default source is
+both.
 
 The Ubuntu host uses curl and unzip for downloads and Docker only to run the
-existing JavaScript normalizer. Imports go directly to the backend container.
+existing JavaScript normalizer and the database-connected importer. No access
+token or application HTTP request is used.
 
 Environment:
-  MACROSAURUS_TOKEN             Complete Supabase JWT for a user in ADMIN_USER_IDS (required in production)
   DEPLOY_ENV_FILE               Production env file (default: .env.production)
   SEED_NODE_IMAGE               Normalizer image (default: node:24-alpine)
   SEED_TMPDIR                   Parent directory for temporary files (default: $TMPDIR or /tmp)
@@ -41,24 +42,45 @@ Environment:
   MATVARETABELLEN_RELEASE       Matvaretabellen release key (default: 2026)
   MATVARETABELLEN_EN_URL        English Matvaretabellen JSON URL
   MATVARETABELLEN_NB_URL        Norwegian Bokmal Matvaretabellen JSON URL
-
-Testing/local development:
-  MACROSAURUS_API_URL           Import through this API URL instead of the Compose backend
-  MACROSAURUS_USER_ID           Development user ID; only accepted with MACROSAURUS_API_URL
 EOF
 }
 
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    usage
-    exit 0
-fi
+source_selection="both"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --source)
+            if [[ $# -lt 2 ]]; then
+                echo "--source requires usda, matvaretabellen, or both." >&2
+                usage >&2
+                exit 2
+            fi
+            source_selection="$2"
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
 
-if [[ $# -ne 0 ]]; then
-    usage >&2
+if [[ "$source_selection" != "usda" && "$source_selection" != "matvaretabellen" && "$source_selection" != "both" ]]; then
+    echo "Invalid source: $source_selection" >&2
+    echo "Choose usda, matvaretabellen, or both." >&2
     exit 2
 fi
+readonly source_selection
 
-for required_command in docker curl unzip; do
+required_commands=(docker curl)
+if [[ "$source_selection" == "usda" || "$source_selection" == "both" ]]; then
+    required_commands+=(unzip)
+fi
+for required_command in "${required_commands[@]}"; do
     if ! command -v "$required_command" >/dev/null 2>&1; then
         echo "Required command not found: $required_command" >&2
         echo "On Ubuntu, install host dependencies with: sudo apt install curl unzip" >&2
@@ -66,46 +88,21 @@ for required_command in docker curl unzip; do
     fi
 done
 
-if [[ -n "${MACROSAURUS_TOKEN:-}" ]]; then
-    if [[ ! "$MACROSAURUS_TOKEN" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
-        echo "MACROSAURUS_TOKEN must be the complete three-part ASCII JWT." >&2
-        echo "Do not use a shortened token containing an ellipsis (... or …), a publishable key, or the 'Bearer ' prefix." >&2
-        exit 1
-    fi
-    auth_header="Authorization: Bearer $MACROSAURUS_TOKEN"
-elif [[ -n "${MACROSAURUS_API_URL:-}" && -n "${MACROSAURUS_USER_ID:-}" ]]; then
-    if [[ ! "$MACROSAURUS_USER_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-        echo "MACROSAURUS_USER_ID contains unsupported characters." >&2
-        exit 1
-    fi
-    auth_header="X-User-Id: $MACROSAURUS_USER_ID"
-else
-    echo "MACROSAURUS_TOKEN is required and must belong to a user listed in ADMIN_USER_IDS." >&2
-    exit 1
-fi
-readonly auth_header
-
 compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-backend_container=""
-api_url="${MACROSAURUS_API_URL:-}"
 
 docker info >/dev/null
-if [[ -z "$api_url" ]]; then
-    if [[ ! -f "$ENV_FILE" ]]; then
-        echo "Production environment file not found: $ENV_FILE" >&2
-        echo "Copy .env.production.example to .env.production and fill in every placeholder." >&2
-        exit 1
-    fi
-    "${compose[@]}" config --quiet
-    backend_container="$("${compose[@]}" ps --status running -q backend)"
-    if [[ -z "$backend_container" ]]; then
-        echo "The production backend is not running. Run ./scripts/deploy.sh first." >&2
-        exit 1
-    fi
-else
-    api_url="${api_url%/}"
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Production environment file not found: $ENV_FILE" >&2
+    echo "Copy .env.production.example to .env.production and fill in every placeholder." >&2
+    exit 1
 fi
-readonly backend_container api_url
+"${compose[@]}" config --quiet
+backend_container="$("${compose[@]}" ps --status running -q backend)"
+if [[ -z "$backend_container" ]]; then
+    echo "The production backend is not running. Run ./scripts/deploy.sh first." >&2
+    exit 1
+fi
+readonly backend_container
 
 seed_temp_parent="${SEED_TMPDIR:-${TMPDIR:-/tmp}}"
 seed_work_directory="$(mktemp -d "$seed_temp_parent/macrosaurus-seed.XXXXXX")"
@@ -117,11 +114,6 @@ cleanup() {
     rmdir "$seed_work_directory" 2>/dev/null || true
 }
 trap cleanup EXIT
-
-auth_header_file="$seed_work_directory/auth-header"
-readonly auth_header_file
-printf '%s\n' "$auth_header" > "$auth_header_file"
-chmod 600 "$auth_header_file"
 
 download_file() {
     local url="$1"
@@ -164,64 +156,56 @@ import_release() {
     local release_file="$1"
 
     echo "Importing $(basename "$release_file")..."
-    if [[ -n "$api_url" ]]; then
-        curl --fail-with-body --silent --show-error \
-            --header "@$auth_header_file" \
-            --header "Content-Type: application/json" \
-            --data-binary "@$release_file" \
-            "$api_url/admin/catalog-imports"
-    else
-        {
-            printf '%s\n' "$auth_header"
-            cat "$release_file"
-        } | docker exec -i "$backend_container" sh -eu -c '
-            IFS= read -r authorization_header
-            curl --fail-with-body --silent --show-error \
-                --header "$authorization_header" \
-                --header "Content-Type: application/json" \
-                --data-binary @- \
-                http://127.0.0.1:8080/api/v1/admin/catalog-imports
-        '
-    fi
+    docker exec -i "$backend_container" \
+        java -jar /app/app.jar \
+        --spring.main.web-application-type=none \
+        --spring.main.banner-mode=off \
+        --spring.flyway.enabled=false \
+        --macrosaurus.catalog-import.enabled=true \
+        < "$release_file"
     printf '\n'
 }
 
-echo "Seeding the catalog from pinned public datasets..."
+echo "Seeding '$source_selection' from pinned public datasets..."
 
-foundation_json="$seed_work_directory/foundation.json"
-foundation_release="$seed_work_directory/foundation-release.json"
-download_json_archive \
-    "$USDA_FOUNDATION_URL" \
-    foundation.zip \
-    FoodData_Central_foundation_food_json_2026-04-30.json \
-    "$foundation_json"
-prepare_release usda-foundation \
-    --release "$USDA_FOUNDATION_RELEASE" --input /work/foundation.json --output /work/foundation-release.json
-import_release "$foundation_release"
-rm "$foundation_json" "$foundation_release"
+if [[ "$source_selection" == "usda" || "$source_selection" == "both" ]]; then
+    foundation_json="$seed_work_directory/foundation.json"
+    foundation_release="$seed_work_directory/foundation-release.json"
+    download_json_archive \
+        "$USDA_FOUNDATION_URL" \
+        foundation.zip \
+        FoodData_Central_foundation_food_json_2026-04-30.json \
+        "$foundation_json"
+    prepare_release usda-foundation \
+        --release "$USDA_FOUNDATION_RELEASE" --input /work/foundation.json --output /work/foundation-release.json
+    import_release "$foundation_release"
+    rm "$foundation_json" "$foundation_release"
 
-sr_legacy_json="$seed_work_directory/sr-legacy.json"
-sr_legacy_release="$seed_work_directory/sr-legacy-release.json"
-download_json_archive \
-    "$USDA_SR_LEGACY_URL" \
-    sr-legacy.zip \
-    FoodData_Central_sr_legacy_food_json_2018-04.json \
-    "$sr_legacy_json"
-prepare_release usda-sr-legacy \
-    --release "$USDA_SR_LEGACY_RELEASE" --input /work/sr-legacy.json --output /work/sr-legacy-release.json
-import_release "$sr_legacy_release"
-rm "$sr_legacy_json" "$sr_legacy_release"
+    sr_legacy_json="$seed_work_directory/sr-legacy.json"
+    sr_legacy_release="$seed_work_directory/sr-legacy-release.json"
+    download_json_archive \
+        "$USDA_SR_LEGACY_URL" \
+        sr-legacy.zip \
+        FoodData_Central_sr_legacy_food_json_2018-04.json \
+        "$sr_legacy_json"
+    prepare_release usda-sr-legacy \
+        --release "$USDA_SR_LEGACY_RELEASE" --input /work/sr-legacy.json --output /work/sr-legacy-release.json
+    import_release "$sr_legacy_release"
+    rm "$sr_legacy_json" "$sr_legacy_release"
+fi
 
-matvaretabellen_en="$seed_work_directory/matvaretabellen-en.json"
-matvaretabellen_nb="$seed_work_directory/matvaretabellen-nb.json"
-matvaretabellen_release="$seed_work_directory/matvaretabellen-release.json"
-download_file "$MATVARETABELLEN_EN_URL" "$matvaretabellen_en"
-download_file "$MATVARETABELLEN_NB_URL" "$matvaretabellen_nb"
-prepare_release matvaretabellen \
-    --release "$MATVARETABELLEN_RELEASE" \
-    --input-en /work/matvaretabellen-en.json \
-    --input-nb /work/matvaretabellen-nb.json \
-    --output /work/matvaretabellen-release.json
-import_release "$matvaretabellen_release"
+if [[ "$source_selection" == "matvaretabellen" || "$source_selection" == "both" ]]; then
+    matvaretabellen_en="$seed_work_directory/matvaretabellen-en.json"
+    matvaretabellen_nb="$seed_work_directory/matvaretabellen-nb.json"
+    matvaretabellen_release="$seed_work_directory/matvaretabellen-release.json"
+    download_file "$MATVARETABELLEN_EN_URL" "$matvaretabellen_en"
+    download_file "$MATVARETABELLEN_NB_URL" "$matvaretabellen_nb"
+    prepare_release matvaretabellen \
+        --release "$MATVARETABELLEN_RELEASE" \
+        --input-en /work/matvaretabellen-en.json \
+        --input-nb /work/matvaretabellen-nb.json \
+        --output /work/matvaretabellen-release.json
+    import_release "$matvaretabellen_release"
+fi
 
 echo "Catalog seeding completed successfully."

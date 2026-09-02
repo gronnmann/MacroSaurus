@@ -88,12 +88,12 @@ At least one target field is required, and minimum cannot exceed maximum.
 | `GET` | `/me/features` | Return admin status and AI scan grant/provider availability |
 | `GET` | `/admin/users?query={text}` | Admin-only profile/grant search |
 | `PUT` | `/admin/users/{userId}/features/ai-label-scan` | Admin-only idempotent grant update with `{ "enabled": true }` |
-| `POST` | `/admin/catalog-imports` | Admin-only normalized Matvaretabellen/USDA release import |
 
 Administrator identity comes only from `ADMIN_USER_IDS`; it is not assignable
 through the API. AI scan endpoints return 403 without a grant and 503 when the
-configured provider is unavailable. See the integrations guide for the catalog
-release contract.
+configured provider is unavailable. Catalog releases are imported directly from
+the production host rather than exposed as an HTTP endpoint; see the integrations
+guide for the operator command.
 
 ## Goal setup and weekly coaching
 

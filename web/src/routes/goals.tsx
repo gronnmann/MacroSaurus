@@ -13,6 +13,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
+import { parseDecimal } from '../lib/utils'
 import type { NutrientTarget } from '../types'
 
 export function GoalsPage() {
@@ -100,7 +101,8 @@ function TargetRow({ target }: { target: NutrientTarget }) {
     const submit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         const data = new FormData(event.currentTarget)
-        const value = (key: string) => (data.get(key) === '' ? undefined : Number(data.get(key)))
+        const value = (key: string) =>
+            data.get(key) === '' ? undefined : parseDecimal(data.get(key))
         save.mutate({
             targetAmount: value('target'),
             minimumAmount: value('minimum'),
@@ -158,27 +160,24 @@ function TargetRow({ target }: { target: NutrientTarget }) {
                     <Field label={`Target (${target.unit})`}>
                         <input
                             name="target"
-                            type="number"
-                            min="0"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             defaultValue={target.targetAmount}
                         />
                     </Field>
                     <Field label="Minimum">
                         <input
                             name="minimum"
-                            type="number"
-                            min="0"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             defaultValue={target.minimumAmount}
                         />
                     </Field>
                     <Field label="Maximum">
                         <input
                             name="maximum"
-                            type="number"
-                            min="0"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             defaultValue={target.maximumAmount}
                         />
                     </Field>

@@ -6,6 +6,7 @@ import com.macrosaurus.catalog.FoodCatalog
 import com.macrosaurus.catalog.FoodCreator
 import com.macrosaurus.catalog.FoodDraft
 import com.macrosaurus.catalog.FoodResolver
+import com.macrosaurus.catalog.ImportedFood
 import com.macrosaurus.catalog.PortionDraft
 import com.macrosaurus.catalog.SourceKind
 import com.macrosaurus.catalog.application.CatalogService
@@ -23,7 +24,6 @@ import com.macrosaurus.shared.NotFoundException
 import com.macrosaurus.sharing.application.CreateShareCommand
 import com.macrosaurus.sharing.application.ShareResourceType
 import com.macrosaurus.sharing.application.SharingService
-import com.macrosaurus.tracking.Meal
 import com.macrosaurus.tracking.NutritionDayReview
 import com.macrosaurus.tracking.NutritionDayStatus
 import com.macrosaurus.tracking.application.AddFoodEntryCommand
@@ -126,7 +126,6 @@ class BackendPersistenceIT {
                 unit = "g",
                 localDate = date,
                 consumedAt = OffsetDateTime.parse("2026-08-22T08:00:00+02:00"),
-                meal = Meal.BREAKFAST,
             ),
         )
         val summary = tracking.summary(userId, date.minusDays(1), date.plusDays(1))
@@ -252,5 +251,56 @@ class BackendPersistenceIT {
         val analyzed = tracking.dailyNutrition(userId, reviewDate, reviewDate).single()
         assertThat(analyzed.analysisEnergyKcal).isEqualByComparingTo("2100")
         assertThat(analyzed.analysisWeight).isEqualByComparingTo("0.5")
+    }
+
+    @Test
+    fun `versioned source import preserves provenance and localized search aliases`() {
+        val imported =
+            catalogService.importRelease(
+                SourceKind.MATVARETABELLEN,
+                "2026",
+                "sha256:test-release",
+                listOf(
+                    ImportedFood(
+                        externalId = "matvare-1",
+                        name = "Oatmeal",
+                        locale = "en",
+                        aliases = mapOf("nb" to "Havregrøt"),
+                        nutrients = mapOf("energy_kcal" to BigDecimal("71"), "protein_g" to BigDecimal("2.5")),
+                        portions = listOf(PortionDraft("1 bowl", gramWeight = BigDecimal("250"), default = true)),
+                    ),
+                ),
+            )
+
+        assertThat(imported.importedCount).isEqualTo(1)
+        val food = catalog.search("catalog-import-user", "Havregrøt").single()
+        assertThat(food.name).isEqualTo("Oatmeal")
+        assertThat(food.externalId).isEqualTo("matvare-1")
+        assertThat(food.sourceRelease).isEqualTo("2026")
+        val historicalRevisionId = food.revisionId
+        assertThat(
+            catalogService
+                .importRelease(
+                    SourceKind.MATVARETABELLEN,
+                    "2026",
+                    "sha256:test-release",
+                    listOf(ImportedFood("matvare-1", "Oatmeal", nutrients = mapOf("energy_kcal" to BigDecimal("71")))),
+                ).alreadyImported,
+        ).isTrue()
+
+        catalogService.importRelease(
+            SourceKind.MATVARETABELLEN,
+            "2027",
+            "sha256:test-release-2027",
+            listOf(
+                ImportedFood(
+                    externalId = "matvare-2",
+                    name = "Barley porridge",
+                    nutrients = mapOf("energy_kcal" to BigDecimal("80")),
+                ),
+            ),
+        )
+        assertThat(catalog.search("catalog-import-user", "Havregrøt")).isEmpty()
+        assertThat(catalog.byRevision("catalog-import-user", historicalRevisionId).name).isEqualTo("Oatmeal")
     }
 }

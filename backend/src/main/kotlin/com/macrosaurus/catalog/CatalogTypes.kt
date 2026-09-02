@@ -7,7 +7,7 @@ import java.util.UUID
 
 enum class BasisType { PER_100_G, PER_100_ML, PER_SERVING }
 
-enum class SourceKind { USDA, OPEN_FOOD_FACTS, USER }
+enum class SourceKind { USDA, USDA_FOUNDATION, USDA_SR_LEGACY, MATVARETABELLEN, OPEN_FOOD_FACTS, USER }
 
 data class NutrientDefinition(
     val code: String,
@@ -41,6 +41,8 @@ data class FoodSnapshot(
     val nutrients: Map<String, BigDecimal>,
     val portions: List<PortionSnapshot>,
     val createdAt: OffsetDateTime,
+    val externalId: String? = null,
+    val sourceRelease: String? = null,
 )
 
 data class PortionDraft(
@@ -125,4 +127,35 @@ interface FoodCreator {
         source: SourceKind = SourceKind.USER,
         externalId: String? = null,
     ): FoodSnapshot
+}
+
+data class ImportedFood(
+    val externalId: String,
+    val name: String,
+    val brand: String? = null,
+    val barcode: String? = null,
+    val locale: String? = null,
+    val aliases: Map<String, String> = emptyMap(),
+    val basisType: BasisType = BasisType.PER_100_G,
+    val basisAmount: BigDecimal = BigDecimal("100"),
+    val basisUnit: String = "g",
+    val densityGPerMl: BigDecimal? = null,
+    val nutrients: Map<String, BigDecimal>,
+    val portions: List<PortionDraft> = emptyList(),
+)
+
+data class CatalogImportResult(
+    val source: SourceKind,
+    val releaseKey: String,
+    val importedCount: Int,
+    val alreadyImported: Boolean,
+)
+
+interface CatalogImporter {
+    fun importRelease(
+        source: SourceKind,
+        releaseKey: String,
+        checksum: String,
+        foods: List<ImportedFood>,
+    ): CatalogImportResult
 }

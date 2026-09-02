@@ -48,6 +48,8 @@ data class FoodView(
     val nutrients: Map<String, BigDecimal>,
     val portions: List<PortionView>,
     val createdAt: OffsetDateTime,
+    val externalId: String?,
+    val sourceRelease: String?,
 )
 
 data class PortionInput(
@@ -109,6 +111,8 @@ internal fun FoodSnapshot.toView() =
         nutrients,
         portions.map(PortionSnapshot::toView),
         createdAt,
+        externalId,
+        sourceRelease,
     )
 
 internal fun CreateFoodRequest.toDraft() =

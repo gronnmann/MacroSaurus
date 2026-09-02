@@ -54,7 +54,11 @@ internal object FoodDraftValidator {
                 }
             }
 
-            BasisType.PER_SERVING -> {}
+            BasisType.PER_SERVING -> {
+                if (draft.basisAmount.compareTo(BigDecimal.ONE) != 0 || draft.basisUnit.lowercase() !in setOf("serving", "servings")) {
+                    throw InvalidOperationException("PER_SERVING foods must use one serving")
+                }
+            }
         }
     }
 }

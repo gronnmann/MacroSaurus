@@ -16,6 +16,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
+import { prepareLabelImage } from '../lib/image'
 import type { Food, FoodInput } from '../types'
 
 export function ScanPage() {
@@ -36,25 +37,34 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
     const [camera, setCamera] = useState(false)
     const [cameraError, setCameraError] = useState('')
     const [codeError, setCodeError] = useState('')
+    const [searchedCode, setSearchedCode] = useState('')
     const video = useRef<HTMLVideoElement>(null)
     const controls = useRef<IScannerControls | undefined>(undefined)
     const navigate = useNavigate()
     const toast = useToast()
+    const features = useQuery({ queryKey: queryKeys.features, queryFn: api.features })
+    const aiEnabled = Boolean(
+        features.data?.aiLabelScan?.granted && features.data.aiLabelScan.available,
+    )
     const importer = useMutation({
         mutationFn: api.importBarcode,
         onSuccess: (food) => {
             toast.push('Product ready')
             if (onFoodReady) onFoodReady(food)
-            else navigate(`/foods/${food.id}`)
+            else navigate(`/track?food=${food.id}`)
         },
         onError: (error) => toast.push('Could not add product', error.message, 'error'),
     })
     const lookup = useMutation({
         mutationFn: api.barcode,
         onSuccess: (candidates, barcode) => {
+            setSearchedCode(barcode)
             if (candidates.length > 0) importer.mutate(barcode)
         },
-        onError: (error) => toast.push('Barcode lookup failed', error.message, 'error'),
+        onError: (_error, barcode) => {
+            setSearchedCode(barcode)
+            toast.push('Online lookup failed', 'You can still create this food manually.', 'error')
+        },
     })
     const scan = useMutation({
         mutationFn: api.startScan,
@@ -110,17 +120,21 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
         }
     }, [camera, lookUp])
 
-    const readLabel = (file?: File) => {
+    const readLabel = async (file?: File) => {
         if (!file) return
-        const reader = new FileReader()
-        reader.onload = () =>
+        try {
             scan.mutate({
-                image: String(reader.result),
+                image: await prepareLabelImage(file),
                 barcode: code,
                 localeHint: navigator.language,
             })
-        reader.onerror = () => toast.push('Could not open photo', undefined, 'error')
-        reader.readAsDataURL(file)
+        } catch (error) {
+            toast.push(
+                'Could not open photo',
+                error instanceof Error ? error.message : undefined,
+                'error',
+            )
+        }
     }
 
     return (
@@ -184,31 +198,42 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
                 {codeError && <p className="field-error">{codeError}</p>}
             </Card>
             {(lookup.isPending || importer.isPending) && <Skeleton lines={3} />}
-            {lookup.data?.length === 0 && (
+            {searchedCode === code && (lookup.data?.length === 0 || lookup.isError) && (
                 <Card className="label-fallback">
                     <SectionHeader
                         eyebrow="NO MATCH"
-                        title="Read the nutrition label"
+                        title="Create this food"
                         aside={<FileImage />}
                     />
                     <p>
-                        Take one clear photo showing the full nutrition table. You can correct every
-                        value before saving.
+                        The barcode was not found. Start a food with the barcode already filled in,
+                        then add the values from the package.
                     </p>
-                    <label className="upload-zone">
-                        <input
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            capture="environment"
-                            onChange={(event) => readLabel(event.target.files?.[0])}
-                        />
-                        <FileImage />
-                        <b>Take one label photo</b>
-                        <span>JPEG, PNG, or WebP</span>
-                    </label>
-                    <small>
-                        The photo is used to read the label and is not stored by Macrosaurus.
-                    </small>
+                    <Link
+                        className="button button--primary"
+                        to={`/foods/new?barcode=${encodeURIComponent(code)}`}
+                    >
+                        Create food manually
+                    </Link>
+                    {aiEnabled && (
+                        <>
+                            <label className="upload-zone">
+                                <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    capture="environment"
+                                    onChange={(event) => readLabel(event.target.files?.[0])}
+                                />
+                                <FileImage />
+                                <b>Fill from a label photo</b>
+                                <span>JPEG, PNG, or WebP</span>
+                            </label>
+                            <small>
+                                The resized photo is sent for extraction and is not stored by
+                                Macrosaurus.
+                            </small>
+                        </>
+                    )}
                 </Card>
             )}
         </div>
@@ -235,7 +260,7 @@ export function ScanReviewPage() {
         mutationFn: (input: FoodInput) => api.confirmScan(id, input),
         onSuccess: (food) => {
             toast.push('Food created')
-            navigate(`/foods/${food.id}`)
+            navigate(`/track?food=${food.id}`)
         },
         onError: (error) => toast.push('Could not save food', error.message, 'error'),
     })

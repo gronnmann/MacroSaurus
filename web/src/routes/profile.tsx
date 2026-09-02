@@ -14,7 +14,7 @@ import {
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
 import { useAppAuth } from '../lib/auth'
-import { formatNumber } from '../lib/utils'
+import { formatNumber, parseDecimal } from '../lib/utils'
 import { NutrientGoals } from './goals'
 
 export function ProfilePage() {
@@ -146,11 +146,11 @@ function AccountForm({ profile }: { profile: Awaited<ReturnType<typeof api.profi
             timezone: String(data.get('timezone')),
             unitSystem: 'METRIC',
             birthDate: String(data.get('birthDate')) || undefined,
-            heightCm: data.get('heightCm') ? Number(data.get('heightCm')) : undefined,
+            heightCm: data.get('heightCm') ? parseDecimal(data.get('heightCm')) : undefined,
             formulaSex: data.get('formulaSex')
                 ? (String(data.get('formulaSex')) as 'MALE' | 'FEMALE')
                 : undefined,
-            activityMultiplier: Number(data.get('activityMultiplier')),
+            activityMultiplier: parseDecimal(data.get('activityMultiplier')),
         })
     }
     return (
@@ -167,10 +167,8 @@ function AccountForm({ profile }: { profile: Awaited<ReturnType<typeof api.profi
                     <Field label="Height (cm)">
                         <input
                             name="heightCm"
-                            type="number"
-                            min="30"
-                            max="300"
-                            step="0.1"
+                            type="text"
+                            inputMode="decimal"
                             defaultValue={profile.heightCm}
                         />
                     </Field>

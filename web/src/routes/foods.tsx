@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Pencil } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { FoodForm } from '../components/food-form'
 import { NutrientFacts } from '../components/nutrition'
 import { ShareButton } from '../components/share'
@@ -10,14 +10,14 @@ import {
     Button,
     Card,
     ErrorPanel,
-    Field,
     PageHeader,
     SectionHeader,
     Skeleton,
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber, kcal, today } from '../lib/utils'
+import { prepareLabelImage } from '../lib/image'
+import { formatNumber, kcal, parseDecimal, today } from '../lib/utils'
 import type { Food, FoodInput } from '../types'
 
 export function FoodDetailPage() {
@@ -62,6 +62,9 @@ export function FoodDetailPage() {
                 <Card>
                     <div className="detail-badges">
                         {item.barcode && <Badge>{item.barcode}</Badge>}
+                        <Badge>{sourceLabel(item.source)}</Badge>
+                        {item.sourceRelease && <Badge>{item.sourceRelease}</Badge>}
+                        {item.externalId && <Badge>source ID {item.externalId}</Badge>}
                         <Badge>per {formatNumber(item.basisAmount, item.basisUnit)}</Badge>
                     </div>
                     <NutrientFacts
@@ -96,21 +99,24 @@ export function FoodDetailPage() {
 }
 
 function FoodLogger({ food }: { food: Food }) {
-    const [quantity, setQuantity] = useState(100)
-    const [unit, setUnit] = useState('g')
-    const [portionId, setPortionId] = useState<string>()
-    const [meal, setMeal] = useState('OTHER')
+    const defaultPortion = food.portions.find((portion) => portion.default) || food.portions[0]
+    const [quantity, setQuantity] = useState(String(defaultPortion ? 1 : food.basisAmount))
+    const [unitChoice, setUnitChoice] = useState(
+        defaultPortion ? `portion:${defaultPortion.id}` : defaultFoodUnit(food),
+    )
     const toast = useToast()
     const client = useQueryClient()
+    const numericQuantity = parseDecimal(quantity)
+    const portionId = unitChoice.startsWith('portion:') ? unitChoice.slice(8) : null
     const request = {
-        quantity,
-        unit,
-        portionId: unit === 'portion' ? portionId : null,
+        quantity: numericQuantity,
+        unit: portionId ? 'portion' : unitChoice,
+        portionId,
     }
     const preview = useQuery({
         queryKey: ['resolve', food.revisionId, request],
         queryFn: () => api.resolveFood(food.revisionId, request),
-        enabled: quantity > 0 && (unit !== 'portion' || !!portionId),
+        enabled: numericQuantity > 0,
     })
     const log = useMutation({
         mutationFn: () =>
@@ -118,7 +124,6 @@ function FoodLogger({ food }: { food: Food }) {
                 foodRevisionId: food.revisionId,
                 ...request,
                 localDate: today(),
-                meal,
             }),
         onSuccess: () => {
             client.invalidateQueries({ queryKey: ['diary'] })
@@ -131,46 +136,37 @@ function FoodLogger({ food }: { food: Food }) {
             <div className="quantity-row">
                 <input
                     aria-label="Quantity"
-                    type="number"
-                    min="0.000001"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
+                    onChange={(e) => setQuantity(e.target.value)}
                 />
                 <select
                     aria-label="Unit"
-                    value={unit}
+                    value={unitChoice}
                     onChange={(e) => {
-                        setUnit(e.target.value)
-                        setQuantity(e.target.value === 'portion' ? 1 : 100)
+                        setUnitChoice(e.target.value)
+                        setQuantity(
+                            e.target.value.startsWith('portion:') ? '1' : String(food.basisAmount),
+                        )
                     }}
                 >
-                    <option value="g">grams</option>
-                    <option value="ml">millilitres</option>
-                    {food.portions.length > 0 && <option value="portion">named portion</option>}
+                    {food.basisType === 'PER_100_G' || food.densityGPerMl ? (
+                        <option value="g">grams</option>
+                    ) : null}
+                    {food.basisType === 'PER_100_ML' || food.densityGPerMl ? (
+                        <option value="ml">millilitres</option>
+                    ) : null}
+                    {food.basisType === 'PER_SERVING' ? (
+                        <option value="serving">servings</option>
+                    ) : null}
+                    {food.portions.map((portion) => (
+                        <option value={`portion:${portion.id}`} key={portion.id}>
+                            {portion.name}
+                        </option>
+                    ))}
                 </select>
             </div>
-            {unit === 'portion' && (
-                <Field label="Portion">
-                    <select value={portionId || ''} onChange={(e) => setPortionId(e.target.value)}>
-                        <option value="">Choose portion…</option>
-                        {food.portions.map((p) => (
-                            <option value={p.id} key={p.id}>
-                                {p.name}
-                            </option>
-                        ))}
-                    </select>
-                </Field>
-            )}
-            <Field label="Meal">
-                <select value={meal} onChange={(e) => setMeal(e.target.value)}>
-                    <option>BREAKFAST</option>
-                    <option>LUNCH</option>
-                    <option>DINNER</option>
-                    <option>SNACK</option>
-                    <option>OTHER</option>
-                </select>
-            </Field>
             {preview.data && (
                 <div className="preview-macros">
                     <strong>{kcal(preview.data.nutrients)} kcal</strong>
@@ -194,6 +190,8 @@ export function FoodEditorPage() {
     const navigate = useNavigate()
     const client = useQueryClient()
     const toast = useToast()
+    const [searchParams] = useSearchParams()
+    const barcode = id ? '' : searchParams.get('barcode') || ''
     const food = useQuery({
         queryKey: queryKeys.food(id || ''),
         queryFn: () => api.food(id || ''),
@@ -203,12 +201,23 @@ export function FoodEditorPage() {
         queryKey: queryKeys.nutrients,
         queryFn: api.nutrients,
     })
+    const features = useQuery({ queryKey: queryKeys.features, queryFn: api.features })
+    const scan = useMutation({
+        mutationFn: async (file: File) =>
+            api.startScan({
+                image: await prepareLabelImage(file),
+                barcode: barcode || null,
+                localeHint: navigator.language,
+            }),
+        onSuccess: (job) => navigate(`/scan/${job.id}`),
+        onError: (error) => toast.push('Could not read label', error.message, 'error'),
+    })
     const save = useMutation({
         mutationFn: (input: FoodInput) => (id ? api.updateFood(id, input) : api.createFood(input)),
         onSuccess: (result) => {
             client.invalidateQueries({ queryKey: ['foods'] })
             toast.push(id ? 'Changes saved' : 'Food created')
-            navigate(`/foods/${result.id}`)
+            navigate(id ? `/foods/${result.id}` : `/track?food=${result.id}`)
         },
         onError: (error) => toast.push('Could not save food', error.message, 'error'),
     })
@@ -233,13 +242,51 @@ export function FoodEditorPage() {
                 }
             />
             <FoodForm
-                key={food.data?.revisionId || 'new'}
-                food={food.data}
+                key={food.data?.revisionId || barcode || 'new'}
+                food={
+                    food.data ||
+                    (barcode
+                        ? {
+                              id: '',
+                              revisionId: '',
+                              revision: 0,
+                              name: '',
+                              barcode,
+                              source: 'USER',
+                              basisType: 'PER_100_G',
+                              basisAmount: 100,
+                              basisUnit: 'g',
+                              nutrients: {},
+                              portions: [],
+                              createdAt: '',
+                          }
+                        : undefined)
+                }
                 definitions={definitions.data}
                 pending={save.isPending}
+                aiLabelEnabled={Boolean(
+                    !id &&
+                        features.data?.aiLabelScan?.granted &&
+                        features.data.aiLabelScan.available,
+                )}
+                onLabelPhoto={id ? undefined : (file) => scan.mutate(file)}
                 submitLabel={id ? 'Save changes' : 'Create food'}
                 onSubmit={(input) => save.mutate(input)}
             />
         </>
     )
+}
+
+function defaultFoodUnit(food: Food) {
+    if (food.basisType === 'PER_100_ML') return 'ml'
+    if (food.basisType === 'PER_SERVING') return 'serving'
+    return 'g'
+}
+
+function sourceLabel(source: Food['source']) {
+    if (source === 'MATVARETABELLEN') return 'Matvaretabellen'
+    if (source === 'USDA_FOUNDATION') return 'USDA Foundation'
+    if (source === 'USDA_SR_LEGACY' || source === 'USDA') return 'USDA SR Legacy'
+    if (source === 'OPEN_FOOD_FACTS') return 'Open Food Facts'
+    return 'Custom food'
 }

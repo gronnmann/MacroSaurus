@@ -13,6 +13,7 @@ Flyway applies migrations in order:
 | `V5__app_tracking_and_goals.sql` | Diary portion identity and calorie/macro goal rules |
 | `V6__tracking_history_indexes.sql` | History lookup indexes |
 | `V7__adaptive_coaching.sql` | Setup drafts, weight goals, program revisions, check-ins, day review, and uncertainty fields |
+| `V8__catalog_sources_features_and_mealless_diary.sql` | Source releases/aliases/provenance, feature grants, expanded nutrients, and meal removal |
 
 Never edit a migration after it has been applied outside an expendable local
 database. Add a new numbered migration.
@@ -49,7 +50,9 @@ edited through `PUT /foods/{id}`.
 
 Sources:
 
-- `USDA`: seeded/imported reference data.
+- `USDA`: legacy seeded reference data.
+- `USDA_FOUNDATION` and `USDA_SR_LEGACY`: versioned FoodData Central releases.
+- `MATVARETABELLEN`: versioned Norwegian food-table releases with localized aliases.
 - `OPEN_FOOD_FACTS`: records obtained from OFF.
 - `USER`: private foods requiring `owner_user_id`.
 
@@ -80,7 +83,7 @@ Diary entries contain:
 
 - User and local date.
 - Actual timestamp with offset.
-- Meal slot and display name.
+- Display name.
 - Type: food, recipe, or quick entry.
 - Optional source revision.
 - Entered amount/unit.

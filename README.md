@@ -173,11 +173,11 @@ cross-feature dependency.
 
 ## Data and integrations
 
-- Seeded base foods can come from USDA FoodData Central.
+- Versioned food releases can be imported from USDA FoodData Central and Matvaretabellen.
 - Exact barcode matches can be imported from Open Food Facts.
 - User-created foods are private unless deliberately shared.
-- Label extraction is offered only after a barcode misses and uses one reviewed
-  image through OpenRouter.
+- Admin-granted users can extract a reviewed nutrition draft from one label image
+  after a barcode miss or while creating a food.
 - Barcode frames remain in the browser; the backend receives the decoded number.
 
 External providers are optional for normal local development. See

@@ -4,6 +4,7 @@ import com.macrosaurus.shared.ExternalServiceException
 import com.macrosaurus.shared.ForbiddenException
 import com.macrosaurus.shared.InvalidOperationException
 import com.macrosaurus.shared.NotFoundException
+import com.macrosaurus.shared.ServiceUnavailableException
 import jakarta.validation.ConstraintViolationException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
@@ -46,6 +47,9 @@ internal class ApiExceptionHandler {
 
     @ExceptionHandler(ExternalServiceException::class)
     fun external(error: ExternalServiceException) = problem(HttpStatus.BAD_GATEWAY, error.message ?: "External service failed")
+
+    @ExceptionHandler(ServiceUnavailableException::class)
+    fun unavailable(error: ServiceUnavailableException) = problem(HttpStatus.SERVICE_UNAVAILABLE, error.message ?: "Service unavailable")
 
     private fun problem(
         status: HttpStatus,

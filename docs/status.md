@@ -54,7 +54,9 @@ This document separates implemented behavior from architecture planned for later
 - EAN/UPC checksum validation.
 - Browser-side barcode decoding; camera frames are never uploaded.
 - Exact Open Food Facts lookup and import.
-- Single-photo OpenRouter multimodal structured extraction after barcode no-match.
+- Per-user, admin-granted single-photo OpenRouter extraction from barcode no-match or food creation.
+- Versioned normalized Matvaretabellen, USDA Foundation, and USDA SR Legacy release imports.
+- Searchable localized food aliases and source/release provenance.
 - Mandatory confirmation into a private food.
 - Immutable, expiring/revocable share snapshots.
 
@@ -71,7 +73,7 @@ This document separates implemented behavior from architecture planned for later
 
 ## Not implemented yet
 
-- Complete versioned USDA bulk importer.
+- Automated scheduling and hosting of catalog release imports.
 - Open Food Facts caching, retry/backoff, and text search.
 - Personal API tokens, approved third-party app registration, quotas, and webhooks.
 - Account export, deletion, and retention workflows.

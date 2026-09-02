@@ -43,6 +43,8 @@ internal data class LabelDraft(
     val ingredients: String?,
     val allergens: List<String>,
     val warnings: List<String>,
+    val per100Nutrients: List<ExtractedNutrient> = emptyList(),
+    val perServingNutrients: List<ExtractedNutrient> = emptyList(),
 )
 
 internal data class ScanJob(

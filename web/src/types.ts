@@ -1,8 +1,13 @@
 export type Nutrients = Record<string, number>
 
 export type BasisType = 'PER_100_G' | 'PER_100_ML' | 'PER_SERVING'
-export type FoodSource = 'USDA' | 'OPEN_FOOD_FACTS' | 'USER'
-export type Meal = 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK' | 'OTHER'
+export type FoodSource =
+    | 'USDA'
+    | 'USDA_FOUNDATION'
+    | 'USDA_SR_LEGACY'
+    | 'MATVARETABELLEN'
+    | 'OPEN_FOOD_FACTS'
+    | 'USER'
 
 export interface ProblemDetails {
     type?: string
@@ -52,6 +57,8 @@ export interface Food {
     nutrients: Nutrients
     portions: Portion[]
     createdAt: string
+    externalId?: string
+    sourceRelease?: string
 }
 
 export interface FoodInput {
@@ -79,7 +86,6 @@ export interface DiaryEntry {
     id: string
     localDate: string
     consumedAt: string
-    meal: Meal
     displayName: string
     entryType: 'FOOD' | 'RECIPE' | 'QUICK'
     sourceRevisionId?: string
@@ -352,7 +358,6 @@ export interface ResolvedGoal {
 export interface UpdateDiaryEntryInput {
     localDate: string
     consumedAt: string
-    meal: Meal
     quantity?: number
     unit?: string
     portionId?: string | null
@@ -394,6 +399,8 @@ export interface LabelDraft {
     ingredients?: string
     allergens: string[]
     warnings: string[]
+    per100Nutrients: ExtractedNutrient[]
+    perServingNutrients: ExtractedNutrient[]
 }
 export interface ScanJob {
     id: string
@@ -401,6 +408,20 @@ export interface ScanJob {
     draft?: LabelDraft
     errorMessage?: string
     expiresAt: string
+}
+
+export interface MyFeatures {
+    isAdmin: boolean
+    aiLabelScan: {
+        granted: boolean
+        available: boolean
+    }
+}
+
+export interface AdminUser {
+    userId: string
+    displayName: string
+    aiLabelScanEnabled: boolean
 }
 
 export interface CreatedShare {

@@ -5,6 +5,7 @@ import {
     LayoutDashboard,
     NotebookTabs,
     Plus,
+    ShieldCheck,
     UserRound,
     WifiOff,
 } from 'lucide-react'
@@ -75,6 +76,10 @@ export function ProtectedLayout() {
 function AuthenticatedLayout() {
     const location = useLocation()
     const status = useQuery({ queryKey: queryKeys.coachingStatus, queryFn: api.coachingStatus })
+    const features = useQuery({ queryKey: queryKeys.features, queryFn: api.features })
+    const visibleNav = features.data?.isAdmin
+        ? [...nav, { to: '/admin', label: 'Admin', icon: ShieldCheck, track: false }]
+        : nav
     if (status.isLoading)
         return (
             <div className="auth-loading">
@@ -104,7 +109,7 @@ function AuthenticatedLayout() {
                 <aside className="sidebar">
                     <Brand />
                     <nav aria-label="Main navigation">
-                        {nav.map((item) => (
+                        {visibleNav.map((item) => (
                             <NavLink
                                 className={item.track ? 'nav-track' : ''}
                                 to={item.to}
@@ -140,7 +145,7 @@ function AuthenticatedLayout() {
                         <Outlet />
                     </main>
                     <nav className="bottom-nav" aria-label="Mobile navigation">
-                        {nav.map((item) =>
+                        {visibleNav.map((item) =>
                             item.track ? (
                                 <Link
                                     className="bottom-track"

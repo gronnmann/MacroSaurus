@@ -1,2 +1,2 @@
-@org.springframework.modulith.ApplicationModule(allowedDependencies = {"catalog", "shared"})
+@org.springframework.modulith.ApplicationModule(allowedDependencies = {"catalog", "identity", "shared"})
 package com.macrosaurus.acquisition;

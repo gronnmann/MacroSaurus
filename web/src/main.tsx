@@ -5,6 +5,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { AppAuthProvider } from './lib/auth'
+import { installDecimalCommaSupport } from './lib/decimal-input'
 import './styles/tokens.css'
 import './styles/global.css'
 import './styles/components.css'
@@ -16,6 +17,8 @@ const queryClient = new QueryClient({
         mutations: { retry: 0 },
     },
 })
+
+installDecimalCommaSupport()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Macrosaurus could not find its application root.')

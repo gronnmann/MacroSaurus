@@ -515,21 +515,9 @@
     margin-bottom: 1rem;
     align-items: start;
 }
-.diary-list,
-.meal-group {
+.diary-list {
     display: grid;
     gap: 0.6rem;
-}
-.meal-group + .meal-group {
-    margin-top: 1rem;
-}
-.meal-group > h3 {
-    margin: 0;
-    color: var(--green-700);
-    font-family: var(--font-display);
-    font-size: 0.82rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
 }
 .diary-entry {
     display: grid;
@@ -2685,7 +2673,7 @@
     background: #e3e5e4;
     padding: 1rem;
 }
-.track-amount-entry input[type="number"] {
+.track-amount-entry input[inputmode="decimal"] {
     min-height: 62px;
     border: 2px solid var(--green-950);
     background: white;

@@ -51,6 +51,9 @@ const ProfilePage = lazy(() =>
         default: module.ProfilePage,
     })),
 )
+const AdminPage = lazy(() =>
+    import('./routes/admin').then((module) => ({ default: module.AdminPage })),
+)
 const SetupPage = lazy(() =>
     import('./routes/setup').then((module) => ({ default: module.SetupPage })),
 )
@@ -121,6 +124,7 @@ export const router = createBrowserRouter([
                 element: <Navigate to="/profile#nutrition-goals" replace />,
             },
             { path: '/profile', element: screen(<ProfilePage />) },
+            { path: '/admin', element: screen(<AdminPage />) },
             {
                 path: '/settings/profile',
                 element: <Navigate to="/profile" replace />,

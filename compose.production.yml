@@ -12,11 +12,12 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD}
       CORS_ALLOWED_ORIGINS: ${APP_ORIGIN:?Set APP_ORIGIN to the public HTTPS origin}
       SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:?Set ADMIN_USER_IDS to trusted Supabase user UUIDs}
       OFF_BASE_URL: ${OFF_BASE_URL:-https://world.openfoodfacts.org}
       OFF_USER_AGENT: ${OFF_USER_AGENT:?Set OFF_USER_AGENT with a real contact address}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemini-2.5-flash}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemini-3.1-flash-lite}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75.0}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health/readiness"]

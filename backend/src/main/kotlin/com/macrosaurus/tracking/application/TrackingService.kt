@@ -17,7 +17,6 @@ import com.macrosaurus.shared.NutrientValues
 import com.macrosaurus.tracking.DailyNutrition
 import com.macrosaurus.tracking.DiaryEntrySnapshot
 import com.macrosaurus.tracking.DiaryEntryType
-import com.macrosaurus.tracking.Meal
 import com.macrosaurus.tracking.NutritionDayReview
 import com.macrosaurus.tracking.NutritionDayReviewer
 import com.macrosaurus.tracking.NutritionDayStatus
@@ -73,14 +72,12 @@ internal data class AddFoodEntryCommand(
     val portionId: UUID? = null,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
-    val meal: Meal = Meal.OTHER,
 )
 
 internal data class QuickTrackCommand(
     val name: String,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
-    val meal: Meal = Meal.OTHER,
     val calories: BigDecimal? = null,
     val proteinG: BigDecimal = BigDecimal.ZERO,
     val carbohydrateG: BigDecimal = BigDecimal.ZERO,
@@ -94,13 +91,11 @@ internal data class AddRecipeEntryCommand(
     val servings: BigDecimal,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
-    val meal: Meal = Meal.OTHER,
 )
 
 internal data class UpdateDiaryEntryCommand(
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime,
-    val meal: Meal,
     val quantity: BigDecimal? = null,
     val unit: String? = null,
     val portionId: UUID? = null,
@@ -158,7 +153,6 @@ internal class TrackingService(
             userId,
             request.localDate,
             request.consumedAt ?: OffsetDateTime.now(clock),
-            request.meal,
             resolved.displayName,
             DiaryEntryType.FOOD,
             request.foodRevisionId,
@@ -190,7 +184,6 @@ internal class TrackingService(
             userId,
             request.localDate,
             request.consumedAt ?: OffsetDateTime.now(clock),
-            request.meal,
             request.name.trim(),
             DiaryEntryType.QUICK,
             null,
@@ -236,7 +229,6 @@ internal class TrackingService(
             userId,
             request.localDate,
             request.consumedAt ?: OffsetDateTime.now(clock),
-            request.meal,
             recipe.name,
             DiaryEntryType.RECIPE,
             request.recipeRevisionId,
@@ -294,7 +286,6 @@ internal class TrackingService(
             entryId,
             request.localDate,
             request.consumedAt,
-            request.meal,
             resolved.name,
             resolved.quantity,
             resolved.unit,
@@ -324,7 +315,6 @@ internal class TrackingService(
             userId,
             request.destinationDate,
             consumedAt,
-            current.meal,
             current.displayName,
             current.entryType,
             current.sourceRevisionId,
@@ -641,7 +631,6 @@ internal class TrackingService(
         userId: String,
         localDate: LocalDate,
         consumedAt: OffsetDateTime,
-        meal: Meal,
         displayName: String,
         type: DiaryEntryType,
         revisionId: UUID?,
@@ -655,7 +644,6 @@ internal class TrackingService(
             userId,
             localDate,
             consumedAt,
-            meal,
             displayName,
             type,
             revisionId,

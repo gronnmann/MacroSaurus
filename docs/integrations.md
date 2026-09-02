@@ -7,18 +7,75 @@
 Migration `V2__seed_nutrients_and_foods.sql` includes three representative USDA
 foods and common nutrient definitions so the app works immediately.
 
-This is not the planned complete USDA seed pipeline. A production importer still
-needs to:
+The explicit release importer accepts `USDA_FOUNDATION` and `USDA_SR_LEGACY`
+normalized releases at `POST /api/v1/admin/catalog-imports`. Use the Foundation
+April 2026 and SR Legacy April 2018 JSON downloads, excluding Branded and FNDDS
+data. Extract the downloaded archive and prepare it with:
 
-1. Download a pinned FoodData Central bulk release.
-2. Record release/version metadata and checksums.
-3. Map FDC nutrient IDs into canonical nutrient codes.
-4. Load staging tables and validate counts/units.
-5. Publish atomically without overwriting historical revisions.
-6. Preserve the FDC ID and attribution.
+```sh
+node scripts/prepare-catalog-release.mjs usda-foundation \
+  --release 2026-04 --input FoodData_Central_foundation_food_json_2026-04-16.json \
+  --output foundation-2026-04.json
+node scripts/prepare-catalog-release.mjs usda-sr-legacy \
+  --release 2018-04 --input FoodData_Central_sr_legacy_food_json_2018-04.json \
+  --output sr-legacy-2018-04.json
+```
+
+The preparer requires the matching official `FoundationFoods` or
+`SRLegacyFoods` root key, so a Branded or FNDDS export cannot be imported by
+accident.
+Each run:
+
+1. Requires a pinned release key and checksum.
+2. Maps already-normalized canonical nutrient codes and named portions.
+3. Publishes the source atomically and deactivates records absent from the new release.
+4. Preserves older food revisions used by existing Food Log entries.
+5. Exposes the FDC ID and release provenance in food responses.
 
 USDA FoodData Central data is published as CC0/public domain, but attribution
 should still be shown in product and API surfaces.
+
+## Matvaretabellen
+
+The same explicit endpoint accepts `MATVARETABELLEN` releases. The preparer
+downloads the official English and Norwegian Bokmål API exports together, keeps
+English as the display name, and adds the Bokmål name as a searchable alias:
+
+```sh
+node scripts/prepare-catalog-release.mjs matvaretabellen \
+  --release 2026 --output matvaretabellen-2026.json
+```
+
+It maps Matvaretabellen nutrient IDs and named gram portions, preserves the food
+identifier as `externalId`, and computes a checksum over both raw exports. Keep
+the required Matvaretabellen attribution in deployments that redistribute the
+data.
+
+The request body is a normalized release:
+
+```json
+{
+  "source": "MATVARETABELLEN",
+  "releaseKey": "2026",
+  "checksum": "sha256:…",
+  "foods": [{
+    "externalId": "food-id",
+    "name": "Oatmeal",
+    "locale": "en",
+    "aliases": { "nb": "Havregrøt" },
+    "basisType": "PER_100_G",
+    "basisAmount": 100,
+    "basisUnit": "g",
+    "nutrients": { "energy_kcal": 71, "protein_g": 2.5 },
+    "portions": [{ "name": "1 bowl", "gramWeight": 250, "default": true }]
+  }]
+}
+```
+
+Run a prepared release with `node scripts/import-catalog-release.mjs release.json`.
+The job uses `MACROSAURUS_API_URL` (default `http://localhost:8080/api/v1`) and
+either `MACROSAURUS_TOKEN` for production or `MACROSAURUS_USER_ID` for local
+development. Replaying the same source/release/checksum is idempotent.
 
 ## Open Food Facts
 
@@ -57,11 +114,11 @@ The label extractor calls:
 POST {OPENROUTER_BASE_URL}/chat/completions
 ```
 
-It submits one to four JPEG/PNG/WebP data URLs and requests a strict JSON Schema
+It submits one resized JPEG data URL and requests a strict JSON Schema
 result containing:
 
 - Product/brand/barcode.
-- Nutrition basis and quantity.
+- Separate printed per-100 and per-serving nutrient columns.
 - Optional serving mass/volume.
 - Nutrient code, amount, unit, and confidence.
 - Ingredients, allergens, and warnings.
@@ -85,6 +142,7 @@ Privacy behavior:
 - The structured draft is stored for review.
 - Confirmation clears the draft and creates a private food.
 - The user must review/correct every draft; confidence is informational.
+- Every scan endpoint checks the per-user `ai-label-scan` grant server-side.
 
 Current limitations:
 

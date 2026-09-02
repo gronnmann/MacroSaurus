@@ -81,6 +81,20 @@ Target example:
 
 At least one target field is required, and minimum cannot exceed maximum.
 
+## Feature access and administration
+
+| Method | Path | Behavior |
+|---|---|---|
+| `GET` | `/me/features` | Return admin status and AI scan grant/provider availability |
+| `GET` | `/admin/users?query={text}` | Admin-only profile/grant search |
+| `PUT` | `/admin/users/{userId}/features/ai-label-scan` | Admin-only idempotent grant update with `{ "enabled": true }` |
+| `POST` | `/admin/catalog-imports` | Admin-only normalized Matvaretabellen/USDA release import |
+
+Administrator identity comes only from `ADMIN_USER_IDS`; it is not assignable
+through the API. AI scan endpoints return 403 without a grant and 503 when the
+configured provider is unavailable. See the integrations guide for the catalog
+release contract.
+
 ## Goal setup and weekly coaching
 
 The setup draft is persisted after each step, so an interrupted onboarding or
@@ -207,8 +221,7 @@ Track 118 g of a food:
   "quantity": 118,
   "unit": "g",
   "localDate": "2026-08-17",
-  "consumedAt": "2026-08-17T08:15:00+02:00",
-  "meal": "BREAKFAST"
+  "consumedAt": "2026-08-17T08:15:00+02:00"
 }
 ```
 
@@ -218,7 +231,6 @@ Quick track:
 {
   "name": "Post-workout shake",
   "localDate": "2026-08-17",
-  "meal": "SNACK",
   "calories": null,
   "proteinG": 30,
   "carbohydrateG": 20,
@@ -331,6 +343,8 @@ Image requests contain JPEG, PNG, or WebP data URLs:
 ```
 
 Confirmation uses the same body as `POST /foods`; the extraction is only a draft.
+The draft exposes both `per100Nutrients` and `perServingNutrients`, plus the
+normalized `nutrients` selected for the food basis.
 Barcode camera frames never use this endpoint. The web client decodes the camera
 stream locally and calls `/barcodes/{eanOrUpc}` with text only.
 

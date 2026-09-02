@@ -1,6 +1,8 @@
-import { Plus, Trash2 } from 'lucide-react'
+import { Camera, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
+import { parseDecimal } from '../lib/utils'
 import type { Food, FoodInput, NutrientDefinition } from '../types'
 import { Button, Card, Field, SectionHeader } from './ui'
 
@@ -9,38 +11,38 @@ const schema = z.object({
     brand: z.string(),
     barcode: z.string(),
     basisType: z.enum(['PER_100_G', 'PER_100_ML', 'PER_SERVING']),
-    basisAmount: z.number().positive(),
-    basisUnit: z.string().min(1),
     densityGPerMl: z.number().positive().optional(),
     nutrients: z.record(z.string(), z.number().min(0)),
     portions: z.array(
-        z
-            .object({
-                name: z.string().min(1),
-                quantity: z.number().positive(),
-                gramWeight: z.number().positive().optional(),
-                milliliterVolume: z.number().positive().optional(),
-                default: z.boolean(),
-            })
-            .refine(
-                (value) => value.gramWeight != null || value.milliliterVolume != null,
-                'Add a gram or millilitre equivalent',
-            ),
+        z.object({
+            name: z.string().trim().min(1, 'Portion name is required'),
+            equivalent: z.number().positive('Equivalent must be greater than zero'),
+            unit: z.enum(['g', 'ml']),
+        }),
     ),
 })
 type FoodFormValues = z.infer<typeof schema>
+
+const decimalValue = (value: unknown) => {
+    if (String(value ?? '').trim() === '') return undefined
+    return parseDecimal(value)
+}
 
 export function FoodForm({
     food,
     definitions = [],
     submitLabel = 'Save food',
     pending,
+    aiLabelEnabled = false,
+    onLabelPhoto,
     onSubmit,
 }: {
     food?: Food
     definitions?: NutrientDefinition[]
     submitLabel?: string
     pending?: boolean
+    aiLabelEnabled?: boolean
+    onLabelPhoto?: (file: File) => void
     onSubmit: (input: FoodInput) => void
 }) {
     const defaults: FoodFormValues = {
@@ -48,17 +50,13 @@ export function FoodForm({
         brand: food?.brand || '',
         barcode: food?.barcode || '',
         basisType: food?.basisType || 'PER_100_G',
-        basisAmount: food?.basisAmount || 100,
-        basisUnit: food?.basisUnit || 'g',
         densityGPerMl: food?.densityGPerMl,
         nutrients: food?.nutrients || {},
         portions:
-            food?.portions.map((p) => ({
-                name: p.name,
-                quantity: p.quantity,
-                gramWeight: p.gramWeight,
-                milliliterVolume: p.milliliterVolume,
-                default: p.default,
+            food?.portions.map((portion) => ({
+                name: portion.name,
+                equivalent: portion.gramWeight ?? portion.milliliterVolume ?? 1,
+                unit: portion.gramWeight != null ? ('g' as const) : ('ml' as const),
             })) || [],
     }
     const {
@@ -67,10 +65,13 @@ export function FoodForm({
         watch,
         handleSubmit,
         setError,
-        setValue,
         formState: { errors },
     } = useForm<FoodFormValues>({ defaultValues: defaults })
     const portions = useFieldArray({ control, name: 'portions' })
+    const [defaultPortionIndex, setDefaultPortionIndex] = useState(() => {
+        const index = food?.portions.findIndex((portion) => portion.default) ?? -1
+        return index >= 0 ? index : 0
+    })
     const basis = watch('basisType')
     const submit = (values: FoodFormValues) => {
         const nutrients = Object.fromEntries(
@@ -79,26 +80,40 @@ export function FoodForm({
         const result = schema.safeParse({ ...values, nutrients })
         if (!result.success) {
             result.error.issues.forEach((issue) => {
-                setError(issue.path.join('.') as keyof FoodFormValues, {
-                    message: issue.message,
-                })
+                setError(issue.path.join('.') as keyof FoodFormValues, { message: issue.message })
             })
             return
         }
+        const basisAmount = result.data.basisType === 'PER_SERVING' ? 1 : 100
+        const basisUnit =
+            result.data.basisType === 'PER_100_G'
+                ? 'g'
+                : result.data.basisType === 'PER_100_ML'
+                  ? 'ml'
+                  : 'serving'
         onSubmit({
-            ...result.data,
+            name: result.data.name,
             brand: result.data.brand || null,
             barcode: result.data.barcode || null,
+            basisType: result.data.basisType,
+            basisAmount,
+            basisUnit,
             densityGPerMl: result.data.densityGPerMl || null,
-            portions: result.data.portions.map((p) => ({
-                ...p,
-                gramWeight: p.gramWeight || null,
-                milliliterVolume: p.milliliterVolume || null,
+            nutrients: result.data.nutrients,
+            portions: result.data.portions.map((portion, index) => ({
+                name: portion.name,
+                quantity: 1,
+                gramWeight: portion.unit === 'g' ? portion.equivalent : null,
+                milliliterVolume: portion.unit === 'ml' ? portion.equivalent : null,
+                default: index === defaultPortionIndex,
             })),
         })
     }
     const macroDefs = definitions.filter(
-        (item) => item.category === 'MACRONUTRIENT' || item.code === 'energy_kcal',
+        (item) =>
+            item.category === 'MACRO' ||
+            item.category === 'MACRONUTRIENT' ||
+            item.code === 'energy_kcal',
     )
     const microDefs = definitions.filter((item) => !macroDefs.includes(item))
     const shownMacro = macroDefs.length
@@ -112,6 +127,31 @@ export function FoodForm({
           ]
     return (
         <form className="editor-form" onSubmit={handleSubmit(submit)}>
+            {aiLabelEnabled && onLabelPhoto && (
+                <Card tone="green">
+                    <SectionHeader
+                        eyebrow="AI ASSIST"
+                        title="Fill from the nutrition label"
+                        aside={<Camera />}
+                    />
+                    <p className="muted">
+                        Take a clear photo, then review every extracted value before saving.
+                    </p>
+                    <label className="button button--secondary">
+                        <Camera /> Take label photo
+                        <input
+                            hidden
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            capture="environment"
+                            onChange={(event) => {
+                                const file = event.target.files?.[0]
+                                if (file) onLabelPhoto(file)
+                            }}
+                        />
+                    </label>
+                </Card>
+            )}
             <Card>
                 <SectionHeader eyebrow="IDENTITY" title="What is it?" />
                 <div className="form-grid">
@@ -128,53 +168,29 @@ export function FoodForm({
                             placeholder="Optional EAN / UPC"
                         />
                     </Field>
-                    <Field label="Nutrition basis">
-                        <select
-                            {...register('basisType')}
-                            onChange={(event) => {
-                                register('basisType').onChange(event)
-                                const next = event.target.value
-                                setValue('basisAmount', next === 'PER_SERVING' ? 1 : 100)
-                                setValue(
-                                    'basisUnit',
-                                    next === 'PER_100_G'
-                                        ? 'g'
-                                        : next === 'PER_100_ML'
-                                          ? 'ml'
-                                          : 'serving',
-                                )
-                            }}
-                        >
+                    <Field label="Nutrition values are shown">
+                        <select {...register('basisType')}>
                             <option value="PER_100_G">Per 100 g</option>
                             <option value="PER_100_ML">Per 100 ml</option>
                             <option value="PER_SERVING">Per serving</option>
                         </select>
                     </Field>
-                    <Field label="Basis amount">
-                        <input
-                            type="number"
-                            min="0.000001"
-                            step="any"
-                            {...register('basisAmount', { valueAsNumber: true })}
-                        />
-                    </Field>
-                    <Field label="Basis unit">
-                        <input {...register('basisUnit')} readOnly={basis !== 'PER_SERVING'} />
-                    </Field>
-                    <Field
-                        label="Density (g/ml)"
-                        hint="Only needed when converting mass and volume"
-                    >
-                        <input
-                            type="number"
-                            min="0"
-                            step="any"
-                            {...register('densityGPerMl', {
-                                setValueAs: (value) => (value === '' ? undefined : Number(value)),
-                            })}
-                        />
-                    </Field>
                 </div>
+                {basis !== 'PER_SERVING' && (
+                    <details className="micro-editor">
+                        <summary>Advanced conversion</summary>
+                        <Field
+                            label="Density (g/ml)"
+                            hint="Only needed to convert between weight and volume"
+                        >
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                {...register('densityGPerMl', { setValueAs: decimalValue })}
+                            />
+                        </Field>
+                    </details>
+                )}
             </Card>
             <Card>
                 <SectionHeader
@@ -186,12 +202,10 @@ export function FoodForm({
                     {shownMacro.map((item) => (
                         <Field label={`${item.displayName} (${item.unit})`} key={item.code}>
                             <input
-                                type="number"
-                                min="0"
-                                step="any"
+                                type="text"
+                                inputMode="decimal"
                                 {...register(`nutrients.${item.code}`, {
-                                    setValueAs: (value) =>
-                                        value === '' ? undefined : Number(value),
+                                    setValueAs: decimalValue,
                                 })}
                             />
                         </Field>
@@ -205,12 +219,10 @@ export function FoodForm({
                         {microDefs.map((item) => (
                             <Field label={`${item.displayName} (${item.unit})`} key={item.code}>
                                 <input
-                                    type="number"
-                                    min="0"
-                                    step="any"
+                                    type="text"
+                                    inputMode="decimal"
                                     {...register(`nutrients.${item.code}`, {
-                                        setValueAs: (value) =>
-                                            value === '' ? undefined : Number(value),
+                                        setValueAs: decimalValue,
                                     })}
                                 />
                             </Field>
@@ -226,85 +238,75 @@ export function FoodForm({
                         <Button
                             type="button"
                             variant="secondary"
-                            onClick={() =>
-                                portions.append({
-                                    name: '',
-                                    quantity: 1,
-                                    default: portions.fields.length === 0,
-                                })
-                            }
+                            onClick={() => portions.append({ name: '', equivalent: 1, unit: 'g' })}
                         >
-                            <Plus />
-                            Add portion
+                            <Plus /> Add portion
                         </Button>
                     }
                 />
-                {portions.fields.length === 0 ? (
-                    <p className="muted">
-                        Optional: add scoop, tablespoon, package, slice, or any amount people
-                        actually use.
-                    </p>
-                ) : (
-                    <div className="portion-editor">
-                        {portions.fields.map((field, index) => (
-                            <div className="portion-row" key={field.id}>
-                                <Field label="Portion name">
-                                    <input
-                                        {...register(`portions.${index}.name`)}
-                                        placeholder="scoop"
-                                    />
-                                </Field>
-                                <Field label="Quantity">
-                                    <input
-                                        type="number"
-                                        min="0.000001"
-                                        step="any"
-                                        {...register(`portions.${index}.quantity`, {
-                                            valueAsNumber: true,
-                                        })}
-                                    />
-                                </Field>
-                                <Field label="Weight (g)">
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="any"
-                                        {...register(`portions.${index}.gramWeight`, {
-                                            setValueAs: (value) =>
-                                                value === '' ? undefined : Number(value),
-                                        })}
-                                    />
-                                </Field>
-                                <Field label="Volume (ml)">
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="any"
-                                        {...register(`portions.${index}.milliliterVolume`, {
-                                            setValueAs: (value) =>
-                                                value === '' ? undefined : Number(value),
-                                        })}
-                                    />
-                                </Field>
-                                <label className="check">
-                                    <input
-                                        type="checkbox"
-                                        {...register(`portions.${index}.default`)}
-                                    />
-                                    Default
-                                </label>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    aria-label="Remove portion"
-                                    onClick={() => portions.remove(index)}
-                                >
-                                    <Trash2 />
-                                </Button>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                <p className="muted">
+                    Add directly selectable sizes such as “1 pizza”, “1 spoon”, or “1 package”. The
+                    selected default is offered first when tracking.
+                </p>
+                <div className="portion-editor">
+                    {portions.fields.map((field, index) => (
+                        <div className="portion-row" key={field.id}>
+                            <Field
+                                label="Portion name"
+                                error={errors.portions?.[index]?.name?.message}
+                            >
+                                <input
+                                    {...register(`portions.${index}.name`)}
+                                    placeholder="1 spoon"
+                                />
+                            </Field>
+                            <Field
+                                label="Equivalent"
+                                error={errors.portions?.[index]?.equivalent?.message}
+                            >
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    {...register(`portions.${index}.equivalent`, {
+                                        setValueAs: parseDecimal,
+                                    })}
+                                />
+                            </Field>
+                            <Field label="Unit">
+                                <select {...register(`portions.${index}.unit`)}>
+                                    <option value="g">grams</option>
+                                    <option value="ml">millilitres</option>
+                                </select>
+                            </Field>
+                            <label className="check">
+                                <input
+                                    type="radio"
+                                    name="defaultPortion"
+                                    checked={defaultPortionIndex === index}
+                                    onChange={() => setDefaultPortionIndex(index)}
+                                />
+                                Default
+                            </label>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                aria-label="Remove portion"
+                                onClick={() => {
+                                    portions.remove(index)
+                                    setDefaultPortionIndex((current) =>
+                                        current > index
+                                            ? current - 1
+                                            : current === index
+                                              ? 0
+                                              : current,
+                                    )
+                                }}
+                            >
+                                <Trash2 />
+                            </Button>
+                        </div>
+                    ))}
+                </div>
             </Card>
             <div className="sticky-actions">
                 <span>You can update portions and nutrition later.</span>

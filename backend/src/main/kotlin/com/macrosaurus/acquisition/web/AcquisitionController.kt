@@ -66,6 +66,8 @@ internal data class LabelDraftView(
     val ingredients: String?,
     val allergens: List<String>,
     val warnings: List<String>,
+    val per100Nutrients: List<ExtractedNutrientView>,
+    val perServingNutrients: List<ExtractedNutrientView>,
 )
 
 internal data class ScanJobView(
@@ -119,6 +121,8 @@ private fun LabelDraft.toView() =
         ingredients,
         allergens,
         warnings,
+        per100Nutrients.map { it.toView() },
+        perServingNutrients.map { it.toView() },
     )
 
 private fun ScanJob.toView() = ScanJobView(id, status, draft?.toView(), errorMessage, expiresAt)

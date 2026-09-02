@@ -4,7 +4,6 @@ import com.macrosaurus.shared.JsonCodec
 import com.macrosaurus.shared.NutrientValues
 import com.macrosaurus.tracking.DiaryEntrySnapshot
 import com.macrosaurus.tracking.DiaryEntryType
-import com.macrosaurus.tracking.Meal
 import org.jooq.DSLContext
 import org.springframework.stereotype.Repository
 import java.math.BigDecimal
@@ -38,7 +37,6 @@ internal class JooqDiaryRepository(
         userId: String,
         localDate: LocalDate,
         consumedAt: OffsetDateTime,
-        meal: Meal,
         displayName: String,
         type: DiaryEntryType,
         revisionId: UUID?,
@@ -49,15 +47,14 @@ internal class JooqDiaryRepository(
     ) {
         db.execute(
             """
-            insert into diary_entries(id, user_id, local_date, consumed_at, meal, display_name,
+            insert into diary_entries(id, user_id, local_date, consumed_at, display_name,
                                       entry_type, source_revision_id, quantity, unit, portion_id, nutrients)
-            values (?, ?, ?, cast(? as timestamptz), ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb))
+            values (?, ?, ?, cast(? as timestamptz), ?, ?, ?, ?, ?, ?, cast(? as jsonb))
             """.trimIndent(),
             id,
             userId,
             localDate,
             consumedAt,
-            meal.name,
             displayName,
             type.name,
             revisionId,
@@ -73,7 +70,6 @@ internal class JooqDiaryRepository(
         id: UUID,
         localDate: LocalDate,
         consumedAt: OffsetDateTime,
-        meal: Meal,
         displayName: String,
         quantity: BigDecimal,
         unit: String,
@@ -82,13 +78,12 @@ internal class JooqDiaryRepository(
     ) {
         db.execute(
             """
-            update diary_entries set local_date = ?, consumed_at = cast(? as timestamptz), meal = ?, display_name = ?,
+            update diary_entries set local_date = ?, consumed_at = cast(? as timestamptz), display_name = ?,
                                      quantity = ?, unit = ?, portion_id = ?, nutrients = cast(? as jsonb)
              where id = ? and user_id = ?
             """.trimIndent(),
             localDate,
             consumedAt,
-            meal.name,
             displayName,
             quantity,
             unit,
@@ -111,7 +106,7 @@ internal class JooqDiaryRepository(
         db
             .fetchOne(
                 """
-                select id, local_date, consumed_at, meal, display_name, entry_type, source_revision_id,
+                select id, local_date, consumed_at, display_name, entry_type, source_revision_id,
                        quantity, unit, portion_id, nutrients::text as nutrients
                   from diary_entries where id = ? and user_id = ?
                 """.trimIndent(),
@@ -127,7 +122,7 @@ internal class JooqDiaryRepository(
         db
             .fetch(
                 """
-                select id, local_date, consumed_at, meal, display_name, entry_type, source_revision_id,
+                select id, local_date, consumed_at, display_name, entry_type, source_revision_id,
                        quantity, unit, portion_id, nutrients::text as nutrients
                   from diary_entries
                  where user_id = ? and local_date between ? and ?
@@ -278,7 +273,6 @@ internal class JooqDiaryRepository(
             record.get("id", UUID::class.java)!!,
             record.get("local_date", LocalDate::class.java)!!,
             record.get("consumed_at", OffsetDateTime::class.java)!!,
-            Meal.valueOf(record.get("meal", String::class.java)!!),
             record.get("display_name", String::class.java)!!,
             DiaryEntryType.valueOf(record.get("entry_type", String::class.java)!!),
             record.get("source_revision_id", UUID::class.java),

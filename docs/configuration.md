@@ -14,11 +14,12 @@ them through the deployment platform, or map them through an IDE run profile.
 | `DATABASE_PASSWORD` | `macrosaurus` | Yes | Yes | Database password |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Production | No | Comma-separated trusted web origins |
 | `SUPABASE_URL` | blank | Production | No | Project URL used to derive the Auth issuer and asymmetric JWKS |
+| `ADMIN_USER_IDS` | blank | For administration | No | Comma-separated trusted user UUIDs allowed to grant AI access and run catalog imports |
 | `OFF_BASE_URL` | `https://world.openfoodfacts.org` | No | No | Open Food Facts API base |
 | `OFF_USER_AGENT` | placeholder | Real OFF use | No | Identifies the app and contact address |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | No | No | OpenRouter API base |
 | `OPENROUTER_API_KEY` | blank | For label extraction | Yes | OpenRouter bearer key |
-| `OPENROUTER_MODEL` | `google/gemini-2.5-flash` | For label extraction | No | Image + JSON Schema capable model |
+| `OPENROUTER_MODEL` | `google/gemini-3.1-flash-lite` | For label extraction | No | Image + JSON Schema capable model |
 | `OFF_CONNECT_TIMEOUT` | `5s` | No | No | Open Food Facts connection timeout |
 | `OFF_READ_TIMEOUT` | `15s` | No | No | Open Food Facts response timeout |
 | `OPENROUTER_CONNECT_TIMEOUT` | `5s` | No | No | OpenRouter connection timeout |
@@ -33,6 +34,7 @@ $env:DATABASE_USERNAME = "macrosaurus"
 $env:DATABASE_PASSWORD = "use-a-secret-manager-in-production"
 $env:CORS_ALLOWED_ORIGINS = "https://app.macrosaurus.example"
 $env:SUPABASE_URL = "https://your-project-ref.supabase.co"
+$env:ADMIN_USER_IDS = "your-supabase-user-uuid"
 $env:OFF_USER_AGENT = "Macrosaurus/0.1 (ops@example.com)"
 $env:OPENROUTER_API_KEY = "..."
 mvn -pl backend spring-boot:run

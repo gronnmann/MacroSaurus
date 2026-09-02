@@ -34,7 +34,6 @@ const entry = {
     id: 'entry-1',
     localDate: date,
     consumedAt: `${date}T08:15:00+02:00`,
-    meal: 'BREAKFAST',
     displayName: 'Banana, raw',
     entryType: 'FOOD',
     sourceRevisionId: 'food-revision-1',
@@ -101,6 +100,11 @@ async function mockApi(page: Page) {
         const to = url.searchParams.get('to') ?? date
         let data: unknown = {}
         if (path === '/api/v1/nutrients') data = nutrients
+        else if (path === '/api/v1/me/features')
+            data = {
+                isAdmin: false,
+                aiLabelScan: { granted: true, available: true },
+            }
         else if (path === '/api/v1/me/coaching/status')
             data = {
                 setupComplete: true,
@@ -472,10 +476,11 @@ test('weekly check-in reviews partial logging before accepting targets', async (
 test('label photo appears only after an unmatched barcode', async ({ page }) => {
     await page.goto('/track')
     await page.getByRole('tab', { name: 'Scan' }).click()
-    await expect(page.getByText('Take one label photo')).toHaveCount(0)
+    await expect(page.getByText('Fill from a label photo')).toHaveCount(0)
     await page.getByLabel('Enter barcode').fill('3017620422003')
     await page.getByRole('button', { name: 'Look up' }).click()
-    await expect(page.getByText('Take one label photo')).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Create food manually' })).toBeVisible()
+    await expect(page.getByText('Fill from a label photo')).toBeVisible()
     await expect(page.locator('input[type=file]')).not.toHaveAttribute('multiple', '')
 })
 

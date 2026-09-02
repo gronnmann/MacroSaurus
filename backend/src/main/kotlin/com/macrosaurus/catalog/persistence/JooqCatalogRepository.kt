@@ -1,8 +1,10 @@
 package com.macrosaurus.catalog.persistence
 
 import com.macrosaurus.catalog.BasisType
+import com.macrosaurus.catalog.CatalogImportResult
 import com.macrosaurus.catalog.FoodDraft
 import com.macrosaurus.catalog.FoodSnapshot
+import com.macrosaurus.catalog.ImportedFood
 import com.macrosaurus.catalog.NutrientDefinition
 import com.macrosaurus.catalog.PortionSnapshot
 import com.macrosaurus.catalog.SourceKind
@@ -47,11 +49,14 @@ internal class JooqCatalogRepository(
             .fetch(
                 """
                 select distinct on (f.id) f.id, fr.id as revision_id, fr.revision, fr.name, fr.brand,
-                       f.barcode, f.source_kind, fr.basis_type, fr.basis_amount, fr.basis_unit,
-                       fr.density_g_per_ml, fr.created_at
+                       f.barcode, f.source_kind, f.external_id, sr.release_key as source_release,
+                       fr.basis_type, fr.basis_amount, fr.basis_unit, fr.density_g_per_ml, fr.created_at
                   from foods f join food_revisions fr on fr.food_id = f.id
+                  left join food_source_releases sr on sr.id = fr.source_release_id
                  where (f.source_kind <> 'USER' or f.owner_user_id = ?)
-                   and (fr.name ilike ? or coalesce(fr.brand, '') ilike ? or coalesce(f.barcode, '') = ?)
+                   and f.active
+                   and (fr.name ilike ? or coalesce(fr.brand, '') ilike ? or coalesce(f.barcode, '') = ?
+                        or exists (select 1 from food_aliases a where a.food_id = f.id and a.name ilike ?))
                  order by f.id, fr.revision desc
                  limit ?
                 """.trimIndent(),
@@ -59,6 +64,7 @@ internal class JooqCatalogRepository(
                 term,
                 term,
                 query.trim(),
+                term,
                 limit.coerceIn(1, 100),
             ).let(::foodsFromRecords)
     }
@@ -71,9 +77,10 @@ internal class JooqCatalogRepository(
             db.fetchOne(
                 """
                 select f.id, fr.id as revision_id, fr.revision, fr.name, fr.brand, f.barcode,
-                       f.source_kind, fr.basis_type, fr.basis_amount, fr.basis_unit,
-                       fr.density_g_per_ml, fr.created_at
+                       f.source_kind, f.external_id, sr.release_key as source_release,
+                       fr.basis_type, fr.basis_amount, fr.basis_unit, fr.density_g_per_ml, fr.created_at
                   from foods f join food_revisions fr on fr.food_id = f.id
+                  left join food_source_releases sr on sr.id = fr.source_release_id
                  where f.id = ? and (f.source_kind <> 'USER' or f.owner_user_id = ?)
                  order by fr.revision desc limit 1
                 """.trimIndent(),
@@ -91,9 +98,10 @@ internal class JooqCatalogRepository(
             db.fetchOne(
                 """
                 select f.id, fr.id as revision_id, fr.revision, fr.name, fr.brand, f.barcode,
-                       f.source_kind, fr.basis_type, fr.basis_amount, fr.basis_unit,
-                       fr.density_g_per_ml, fr.created_at
+                       f.source_kind, f.external_id, sr.release_key as source_release,
+                       fr.basis_type, fr.basis_amount, fr.basis_unit, fr.density_g_per_ml, fr.created_at
                   from foods f join food_revisions fr on fr.food_id = f.id
+                  left join food_source_releases sr on sr.id = fr.source_release_id
                  where fr.id = ? and (f.source_kind <> 'USER' or f.owner_user_id = ?)
                 """.trimIndent(),
                 revisionId,
@@ -117,6 +125,8 @@ internal class JooqCatalogRepository(
                     field("fr.brand").`as`("brand"),
                     field("f.barcode").`as`("barcode"),
                     field("f.source_kind").`as`("source_kind"),
+                    field("f.external_id").`as`("external_id"),
+                    field("sr.release_key").`as`("source_release"),
                     field("fr.basis_type").`as`("basis_type"),
                     field("fr.basis_amount").`as`("basis_amount"),
                     field("fr.basis_unit").`as`("basis_unit"),
@@ -125,6 +135,8 @@ internal class JooqCatalogRepository(
                 ).from(table("foods f"))
                 .join(table("food_revisions fr"))
                 .on(field("fr.food_id").eq(field("f.id")))
+                .leftJoin(table("food_source_releases sr"))
+                .on(field("sr.id").eq(field("fr.source_release_id")))
                 .where(field("fr.id", UUID::class.java).`in`(revisionIds))
                 .and(field("f.source_kind").ne("USER").or(field("f.owner_user_id", String::class.java).eq(userId)))
                 .fetch()
@@ -143,10 +155,12 @@ internal class JooqCatalogRepository(
                 select matched.*
                   from (
                     select distinct on (f.id) f.id, fr.id as revision_id, fr.revision, fr.name, fr.brand,
-                           f.barcode, f.source_kind, fr.basis_type, fr.basis_amount, fr.basis_unit,
-                           fr.density_g_per_ml, fr.created_at
+                           f.barcode, f.source_kind, f.external_id, sr.release_key as source_release,
+                           fr.basis_type, fr.basis_amount, fr.basis_unit, fr.density_g_per_ml, fr.created_at
                       from foods f join food_revisions fr on fr.food_id = f.id
+                      left join food_source_releases sr on sr.id = fr.source_release_id
                      where f.barcode = ?
+                       and f.active
                        and (f.source_kind <> 'USER' or f.owner_user_id = ?)
                      order by f.id, fr.revision desc
                   ) matched
@@ -201,16 +215,102 @@ internal class JooqCatalogRepository(
         return get(userId, foodId)
     }
 
+    fun importRelease(
+        source: SourceKind,
+        releaseKey: String,
+        checksum: String,
+        foods: List<ImportedFood>,
+    ): CatalogImportResult {
+        val existing =
+            db.fetchOne(
+                "select status, record_count from food_source_releases where source_kind = ? and release_key = ? and checksum = ?",
+                source.name,
+                releaseKey,
+                checksum,
+            )
+        if (existing?.get("status", String::class.java) == "COMPLETED") {
+            return CatalogImportResult(source, releaseKey, existing.get("record_count", Int::class.java) ?: 0, true)
+        }
+        val releaseId = UUID.randomUUID()
+        db.execute(
+            "insert into food_source_releases(id, source_kind, release_key, checksum, status) values (?, ?, ?, ?, 'IMPORTING')",
+            releaseId,
+            source.name,
+            releaseKey,
+            checksum,
+        )
+        db.execute("update foods set active = false where source_kind = ?", source.name)
+        foods.forEach { imported ->
+            val draft =
+                FoodDraft(
+                    imported.name,
+                    imported.brand,
+                    imported.barcode,
+                    imported.basisType,
+                    imported.basisAmount,
+                    imported.basisUnit,
+                    imported.densityGPerMl,
+                    imported.nutrients,
+                    imported.portions,
+                )
+            validateDraft(draft)
+            val current =
+                db.fetchOne(
+                    "select id, (select coalesce(max(revision), 0) from food_revisions where food_id = foods.id) as revision from foods where source_kind = ? and external_id = ? for update",
+                    source.name,
+                    imported.externalId,
+                )
+            val foodId = current?.get("id", UUID::class.java) ?: UUID.randomUUID()
+            val revision = (current?.get("revision", Int::class.java) ?: 0) + 1
+            if (current == null) {
+                db.execute(
+                    "insert into foods(id, source_kind, external_id, barcode, active) values (?, ?, ?, ?, true)",
+                    foodId,
+                    source.name,
+                    imported.externalId,
+                    normalizeBarcode(imported.barcode),
+                )
+            } else {
+                db.execute(
+                    "update foods set barcode = ?, active = true where id = ?",
+                    normalizeBarcode(imported.barcode),
+                    foodId,
+                )
+            }
+            insertRevision(foodId, UUID.randomUUID(), revision, draft, releaseId, imported.locale)
+            db.execute("delete from food_aliases where food_id = ?", foodId)
+            imported.aliases.forEach { (locale, name) ->
+                if (locale.isNotBlank() && name.isNotBlank()) {
+                    db.execute(
+                        "insert into food_aliases(food_id, locale, name) values (?, ?, ?) on conflict do nothing",
+                        foodId,
+                        locale.trim(),
+                        name.trim(),
+                    )
+                }
+            }
+        }
+        db.execute(
+            "update food_source_releases set status = 'COMPLETED', record_count = ?, imported_at = current_timestamp where id = ?",
+            foods.size,
+            releaseId,
+        )
+        return CatalogImportResult(source, releaseKey, foods.size, false)
+    }
+
     private fun insertRevision(
         foodId: UUID,
         revisionId: UUID,
         revision: Int,
         request: FoodDraft,
+        sourceReleaseId: UUID? = null,
+        locale: String? = null,
     ) {
         db.execute(
             """
-            insert into food_revisions(id, food_id, revision, name, brand, basis_type, basis_amount, basis_unit, density_g_per_ml)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            insert into food_revisions(id, food_id, revision, name, brand, basis_type, basis_amount, basis_unit,
+                                       density_g_per_ml, source_release_id, locale)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             revisionId,
             foodId,
@@ -221,6 +321,8 @@ internal class JooqCatalogRepository(
             request.basisAmount,
             request.basisUnit,
             request.densityGPerMl,
+            sourceReleaseId,
+            locale,
         )
         request.nutrients.forEach { (code, amount) ->
             db.execute(
@@ -313,6 +415,8 @@ internal class JooqCatalogRepository(
                 nutrients[revisionId].orEmpty(),
                 portions[revisionId].orEmpty(),
                 record.get("created_at", OffsetDateTime::class.java)!!,
+                record.get("external_id", String::class.java),
+                record.get("source_release", String::class.java),
             )
         }
     }

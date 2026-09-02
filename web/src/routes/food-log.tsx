@@ -25,7 +25,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber, kcal, round, today } from '../lib/utils'
+import { formatNumber, kcal, parseDecimal, round, today } from '../lib/utils'
 import type { DiaryEntry, Food, Recipe, UpdateDiaryEntryInput } from '../types'
 
 export function FoodLogPage() {
@@ -268,16 +268,15 @@ function EntryEditor({
         const base: UpdateDiaryEntryInput = {
             localDate,
             consumedAt: new Date(`${localDate}T${time}:00`).toISOString(),
-            meal: entry.meal || 'OTHER',
         }
         if (entry.entryType === 'FOOD')
             Object.assign(base, {
-                quantity: Number(data.get('quantity')),
+                quantity: parseDecimal(data.get('quantity')),
                 unit: String(data.get('unit')),
                 portionId: data.get('portionId') || null,
             })
         if (entry.entryType === 'RECIPE')
-            Object.assign(base, { quantity: Number(data.get('quantity')) })
+            Object.assign(base, { quantity: parseDecimal(data.get('quantity')) })
         if (entry.entryType === 'QUICK')
             Object.assign(base, {
                 name: data.get('name'),
@@ -322,40 +321,38 @@ function EntryEditor({
 }
 
 function FoodFields({ entry, food }: { entry: DiaryEntry; food?: Food }) {
-    const initialUnit = entry.portionId ? 'portion' : entry.unit || 'g'
-    const [unit, setUnit] = useState(initialUnit)
+    const initialUnit = entry.portionId ? `portion:${entry.portionId}` : entry.unit || 'g'
+    const [unitChoice, setUnitChoice] = useState(initialUnit)
+    const portionId = unitChoice.startsWith('portion:') ? unitChoice.slice(8) : ''
     return (
         <>
             <Field label="Amount">
                 <input
                     name="quantity"
-                    type="number"
-                    min="0.000001"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     required
                     defaultValue={entry.quantity}
                 />
             </Field>
             <Field label="Unit">
-                <select name="unit" value={unit} onChange={(event) => setUnit(event.target.value)}>
-                    <option value="g">grams</option>
-                    <option value="ml">millilitres</option>
+                <select value={unitChoice} onChange={(event) => setUnitChoice(event.target.value)}>
+                    {(food?.basisType === 'PER_100_G' || food?.densityGPerMl) && (
+                        <option value="g">grams</option>
+                    )}
+                    {(food?.basisType === 'PER_100_ML' || food?.densityGPerMl) && (
+                        <option value="ml">millilitres</option>
+                    )}
                     {food?.basisType === 'PER_SERVING' && <option value="serving">servings</option>}
-                    {food?.portions.length ? <option value="portion">named portion</option> : null}
+                    {food?.portions.map((portion) => (
+                        <option key={portion.id} value={`portion:${portion.id}`}>
+                            {portion.name}
+                        </option>
+                    ))}
                 </select>
+                <input type="hidden" name="unit" value={portionId ? 'portion' : unitChoice} />
+                <input type="hidden" name="portionId" value={portionId} />
             </Field>
-            {unit === 'portion' && (
-                <Field className="span-2" label="Portion">
-                    <select name="portionId" required defaultValue={entry.portionId || ''}>
-                        <option value="">Choose portion…</option>
-                        {food?.portions.map((portion) => (
-                            <option key={portion.id} value={portion.id}>
-                                {portion.name}
-                            </option>
-                        ))}
-                    </select>
-                </Field>
-            )}
         </>
     )
 }
@@ -364,9 +361,8 @@ function RecipeFields({ entry, recipe }: { entry: DiaryEntry; recipe?: Recipe })
         <Field className="span-2" label={`Servings${recipe ? ` of ${recipe.name}` : ''}`}>
             <input
                 name="quantity"
-                type="number"
-                min="0.000001"
-                step="any"
+                type="text"
+                inputMode="decimal"
                 required
                 defaultValue={entry.quantity}
             />
@@ -382,45 +378,40 @@ function QuickFields({ entry }: { entry: DiaryEntry }) {
             <Field label="Calories">
                 <input
                     name="calories"
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     defaultValue={entry.nutrients.energy_kcal}
                 />
             </Field>
             <Field label="Protein (g)">
                 <input
                     name="protein"
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     defaultValue={entry.nutrients.protein_g || 0}
                 />
             </Field>
             <Field label="Carbs (g)">
                 <input
                     name="carbs"
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     defaultValue={entry.nutrients.carbohydrate_g || 0}
                 />
             </Field>
             <Field label="Fat (g)">
                 <input
                     name="fat"
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     defaultValue={entry.nutrients.fat_g || 0}
                 />
             </Field>
             <Field className="span-2" label="Fiber (g)">
                 <input
                     name="fiber"
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     defaultValue={entry.nutrients.fiber_g}
                 />
             </Field>
@@ -491,6 +482,6 @@ const formatTime = (value: string) =>
         hour: '2-digit',
         minute: '2-digit',
     }).format(new Date(value))
-const number = (value: FormDataEntryValue | null) => Number(value || 0)
+const number = (value: FormDataEntryValue | null) => parseDecimal(value || 0)
 const numberOrNull = (value: FormDataEntryValue | null) =>
-    value === '' || value == null ? null : Number(value)
+    value === '' || value == null ? null : parseDecimal(value)

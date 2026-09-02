@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowRight, Check, Gauge, Target, UserRound, Weight } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { DecimalInput } from '../components/decimal-input'
 import { Brand } from '../components/layout'
 import { Badge, Button, Card, ErrorPanel, Field, Skeleton } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber } from '../lib/utils'
+import { formatNumber, parseDecimal } from '../lib/utils'
 import type { CoachingSetupDraft, ProgramStyle, WeightGoalType } from '../types'
 
 const steps = ['About you', 'Starting point', 'Goal', 'Program', 'Review']
@@ -171,14 +172,10 @@ function AboutStep({ draft, update }: { draft: CoachingSetupDraft; update: Updat
                     />
                 </Field>
                 <Field label="Height (cm)">
-                    <input
+                    <DecimalInput
                         required
-                        type="number"
-                        min="30"
-                        max="300"
-                        step="0.1"
                         value={draft.heightCm ?? ''}
-                        onChange={(e) => update('heightCm', number(e.target.value))}
+                        onValue={(value) => update('heightCm', value)}
                     />
                 </Field>
                 <Field label="Formula used for energy">
@@ -219,20 +216,16 @@ function StartingStep({ draft, update }: { draft: CoachingSetupDraft; update: Up
             />
             <div className="form-grid">
                 <Field label="Current weight (kg)">
-                    <input
+                    <DecimalInput
                         required
-                        type="number"
-                        min="10"
-                        max="700"
-                        step="0.1"
                         value={draft.weightKg ?? ''}
-                        onChange={(e) => update('weightKg', number(e.target.value))}
+                        onValue={(value) => update('weightKg', value)}
                     />
                 </Field>
                 <Field label="Usual activity">
                     <select
                         value={draft.activityMultiplier}
-                        onChange={(e) => update('activityMultiplier', Number(e.target.value))}
+                        onChange={(e) => update('activityMultiplier', parseDecimal(e.target.value))}
                     >
                         <option value="1.2">Sedentary</option>
                         <option value="1.375">Lightly active</option>
@@ -286,27 +279,19 @@ function GoalStep({ draft, update }: { draft: CoachingSetupDraft; update: Update
             {draft.goalType && draft.goalType !== 'MAINTAIN' && (
                 <div className="form-grid setup-subform">
                     <Field label="Target weight (kg)">
-                        <input
+                        <DecimalInput
                             required
-                            type="number"
-                            min="10"
-                            max="700"
-                            step="0.1"
                             value={draft.targetWeightKg ?? ''}
-                            onChange={(e) => update('targetWeightKg', number(e.target.value))}
+                            onValue={(value) => update('targetWeightKg', value)}
                         />
                     </Field>
                     <Field
                         label={`Weekly rate (${draft.goalType === 'LOSS' ? '0.25–1.0' : '0.10–0.50'}%)`}
                     >
-                        <input
+                        <DecimalInput
                             required
-                            type="number"
-                            min={draft.goalType === 'LOSS' ? 0.25 : 0.1}
-                            max={draft.goalType === 'LOSS' ? 1 : 0.5}
-                            step="0.05"
                             value={draft.weeklyRatePercent ?? ''}
-                            onChange={(e) => update('weeklyRatePercent', number(e.target.value))}
+                            onValue={(value) => update('weeklyRatePercent', value)}
                         />
                     </Field>
                 </div>
@@ -350,7 +335,7 @@ function ProgramStep({ draft, update }: { draft: CoachingSetupDraft; update: Upd
                             max="2.2"
                             step="0.1"
                             value={draft.proteinGPerKg}
-                            onChange={(e) => update('proteinGPerKg', Number(e.target.value))}
+                            onChange={(e) => update('proteinGPerKg', parseDecimal(e.target.value))}
                         />
                     </Field>
                     <Field label={`Fat · ${draft.fatEnergyPercent}% of calories`}>
@@ -360,46 +345,40 @@ function ProgramStep({ draft, update }: { draft: CoachingSetupDraft; update: Upd
                             max="40"
                             step="1"
                             value={draft.fatEnergyPercent}
-                            onChange={(e) => update('fatEnergyPercent', Number(e.target.value))}
+                            onChange={(e) =>
+                                update('fatEnergyPercent', parseDecimal(e.target.value))
+                            }
                         />
                     </Field>
                 </div>
             ) : draft.programStyle === 'MANUAL' ? (
                 <div className="form-grid setup-subform">
                     <Field label="Calories">
-                        <input
+                        <DecimalInput
                             required
-                            type="number"
-                            min="1"
                             value={draft.manualEnergyKcal ?? ''}
-                            onChange={(e) => update('manualEnergyKcal', number(e.target.value))}
+                            onValue={(value) => update('manualEnergyKcal', value)}
                         />
                     </Field>
                     <Field label="Protein (g)">
-                        <input
+                        <DecimalInput
                             required
-                            type="number"
-                            min="0"
                             value={draft.manualProteinG ?? ''}
-                            onChange={(e) => update('manualProteinG', number(e.target.value))}
+                            onValue={(value) => update('manualProteinG', value)}
                         />
                     </Field>
                     <Field label="Carbohydrate (g)">
-                        <input
+                        <DecimalInput
                             required
-                            type="number"
-                            min="0"
                             value={draft.manualCarbohydrateG ?? ''}
-                            onChange={(e) => update('manualCarbohydrateG', number(e.target.value))}
+                            onValue={(value) => update('manualCarbohydrateG', value)}
                         />
                     </Field>
                     <Field label="Fat (g)">
-                        <input
+                        <DecimalInput
                             required
-                            type="number"
-                            min="0"
                             value={draft.manualFatG ?? ''}
-                            onChange={(e) => update('manualFatG', number(e.target.value))}
+                            onValue={(value) => update('manualFatG', value)}
                         />
                     </Field>
                 </div>
@@ -500,8 +479,4 @@ function StepTitle({
             </div>
         </header>
     )
-}
-
-function number(value: string) {
-    return value === '' ? undefined : Number(value)
 }

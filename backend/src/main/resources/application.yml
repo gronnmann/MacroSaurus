@@ -47,6 +47,8 @@ macrosaurus:
     supabase-url: ${SUPABASE_URL:}
     audience: authenticated
     dev-mode: ${DEV_AUTH_ENABLED:true}
+  admin:
+    user-ids: ${ADMIN_USER_IDS:}
   open-food-facts:
     base-url: ${OFF_BASE_URL:https://world.openfoodfacts.org}
     user-agent: ${OFF_USER_AGENT:Macrosaurus/0.1 (contact@example.com)}
@@ -55,6 +57,6 @@ macrosaurus:
   open-router:
     base-url: ${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}
     api-key: ${OPENROUTER_API_KEY:}
-    model: ${OPENROUTER_MODEL:google/gemini-2.5-flash}
+    model: ${OPENROUTER_MODEL:google/gemini-3.1-flash-lite}
     connect-timeout: ${OPENROUTER_CONNECT_TIMEOUT:5s}
     read-timeout: ${OPENROUTER_READ_TIMEOUT:90s}

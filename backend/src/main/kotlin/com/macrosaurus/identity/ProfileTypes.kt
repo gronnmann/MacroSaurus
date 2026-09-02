@@ -40,3 +40,16 @@ fun interface ProfileWriter {
         update: ProfileUpdate,
     ): ProfileSnapshot
 }
+
+enum class UserFeature(
+    val code: String,
+) {
+    AI_LABEL_SCAN("ai-label-scan"),
+}
+
+fun interface UserFeatureReader {
+    fun enabled(
+        userId: String,
+        feature: UserFeature,
+    ): Boolean
+}

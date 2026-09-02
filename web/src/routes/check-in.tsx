@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarCheck, Check, Gauge, Scale, Utensils } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { DecimalInput } from '../components/decimal-input'
 import {
     Badge,
     Button,
@@ -14,7 +15,7 @@ import {
     StatePanel,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatDate, formatNumber } from '../lib/utils'
+import { formatDate, formatNumber, parseDecimal } from '../lib/utils'
 import type { NutritionDayStatus } from '../types'
 
 export function CheckInPage() {
@@ -220,13 +221,12 @@ function ReviewDay({
                             That is complete
                         </Button>
                     )}
-                    <label>
+                    <label htmlFor={`estimate-${candidate.date}`}>
                         <span>Estimated day total</span>
-                        <input
-                            type="number"
-                            min="1"
+                        <DecimalInput
+                            id={`estimate-${candidate.date}`}
                             value={estimate}
-                            onChange={(e) => setEstimate(Number(e.target.value))}
+                            onValue={(value) => setEstimate(value ?? 0)}
                         />
                         <Button
                             variant="secondary"
@@ -258,12 +258,12 @@ function WeightPrompt({
     const submit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         const data = new FormData(event.currentTarget)
-        onSubmit(Number(data.get('weight')))
+        onSubmit(parseDecimal(data.get('weight')))
     }
     return (
         <form className="weight-form" onSubmit={submit}>
             <Field label="Weight (kg)">
-                <input name="weight" type="number" min="10" max="700" step="0.1" required />
+                <input name="weight" type="text" inputMode="decimal" required />
             </Field>
             <Button type="submit" disabled={pending}>
                 {pending ? 'Saving…' : 'Add weigh-in'}

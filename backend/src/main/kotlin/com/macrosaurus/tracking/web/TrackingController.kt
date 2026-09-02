@@ -3,7 +3,6 @@ package com.macrosaurus.tracking.web
 import com.macrosaurus.shared.CurrentUser
 import com.macrosaurus.tracking.DiaryEntrySnapshot
 import com.macrosaurus.tracking.DiaryEntryType
-import com.macrosaurus.tracking.Meal
 import com.macrosaurus.tracking.NutritionDayReview
 import com.macrosaurus.tracking.NutritionDayStatus
 import com.macrosaurus.tracking.application.AddFoodEntryCommand
@@ -41,7 +40,6 @@ data class DiaryEntryView(
     val id: UUID,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime,
-    val meal: Meal,
     val displayName: String,
     val entryType: DiaryEntryType,
     val sourceRevisionId: UUID?,
@@ -85,14 +83,12 @@ data class AddFoodEntryRequest(
     val portionId: UUID? = null,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
-    val meal: Meal = Meal.OTHER,
 )
 
 data class QuickTrackRequest(
     @field:NotBlank val name: String,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
-    val meal: Meal = Meal.OTHER,
     @field:DecimalMin("0") val calories: BigDecimal? = null,
     @field:DecimalMin("0") val proteinG: BigDecimal = BigDecimal.ZERO,
     @field:DecimalMin("0") val carbohydrateG: BigDecimal = BigDecimal.ZERO,
@@ -106,13 +102,11 @@ data class AddRecipeEntryRequest(
     @field:DecimalMin("0.000001") val servings: BigDecimal,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
-    val meal: Meal = Meal.OTHER,
 )
 
 data class UpdateDiaryEntryRequest(
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime,
-    val meal: Meal,
     @field:DecimalMin("0.000001") val quantity: BigDecimal? = null,
     val unit: String? = null,
     val portionId: UUID? = null,
@@ -141,7 +135,7 @@ data class QuickTrackResult(
     val savedFoodId: UUID?,
 )
 
-private fun DiaryEntrySnapshot.toView() = DiaryEntryView(id, localDate, consumedAt, meal, displayName, entryType, sourceRevisionId, quantity, unit, portionId, nutrients)
+private fun DiaryEntrySnapshot.toView() = DiaryEntryView(id, localDate, consumedAt, displayName, entryType, sourceRevisionId, quantity, unit, portionId, nutrients)
 
 private fun DiaryDay.toView() = DiaryDayView(date, entries.map { it.toView() }, totals)
 
@@ -203,7 +197,7 @@ internal class TrackingController(
     ) = tracking
         .addFood(
             users.userId(),
-            AddFoodEntryCommand(request.foodRevisionId, request.quantity, request.unit, request.portionId, request.localDate, request.consumedAt, request.meal),
+            AddFoodEntryCommand(request.foodRevisionId, request.quantity, request.unit, request.portionId, request.localDate, request.consumedAt),
         ).toView()
 
     @PostMapping("/quick-entries")
@@ -216,7 +210,6 @@ internal class TrackingController(
                 request.name,
                 request.localDate,
                 request.consumedAt,
-                request.meal,
                 request.calories,
                 request.proteinG,
                 request.carbohydrateG,
@@ -232,7 +225,7 @@ internal class TrackingController(
     ) = tracking
         .addRecipe(
             users.userId(),
-            AddRecipeEntryCommand(request.recipeRevisionId, request.servings, request.localDate, request.consumedAt, request.meal),
+            AddRecipeEntryCommand(request.recipeRevisionId, request.servings, request.localDate, request.consumedAt),
         ).toView()
 
     @PutMapping("/diary-entries/{id}")
@@ -246,7 +239,6 @@ internal class TrackingController(
             UpdateDiaryEntryCommand(
                 request.localDate,
                 request.consumedAt,
-                request.meal,
                 request.quantity,
                 request.unit,
                 request.portionId,

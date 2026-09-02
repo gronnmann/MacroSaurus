@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Pencil, Plus, Trash2 } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { DecimalInput } from '../components/decimal-input'
 import { NutrientFacts } from '../components/nutrition'
 import { ShareButton } from '../components/share'
 import {
@@ -16,7 +17,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber, kcal, today } from '../lib/utils'
+import { formatNumber, kcal, parseDecimal, today } from '../lib/utils'
 import type { Food, Recipe, RecipeInput } from '../types'
 
 export function RecipeDetailPage() {
@@ -107,7 +108,6 @@ export function RecipeDetailPage() {
 
 function RecipeLogger({ recipe }: { recipe: Recipe }) {
     const [servings, setServings] = useState(1)
-    const [meal, setMeal] = useState('OTHER')
     const toast = useToast()
     const client = useQueryClient()
     const log = useMutation({
@@ -116,7 +116,6 @@ function RecipeLogger({ recipe }: { recipe: Recipe }) {
                 recipeRevisionId: recipe.revisionId,
                 servings,
                 localDate: today(),
-                meal,
             }),
         onSuccess: () => {
             client.invalidateQueries({ queryKey: ['diary'] })
@@ -127,22 +126,7 @@ function RecipeLogger({ recipe }: { recipe: Recipe }) {
     return (
         <div className="logger">
             <Field label="Servings">
-                <input
-                    type="number"
-                    min="0.000001"
-                    step="any"
-                    value={servings}
-                    onChange={(e) => setServings(Number(e.target.value))}
-                />
-            </Field>
-            <Field label="Meal">
-                <select value={meal} onChange={(e) => setMeal(e.target.value)}>
-                    <option>BREAKFAST</option>
-                    <option>LUNCH</option>
-                    <option>DINNER</option>
-                    <option>SNACK</option>
-                    <option>OTHER</option>
-                </select>
+                <DecimalInput value={servings} onValue={(value) => setServings(value ?? 0)} />
             </Field>
             <div className="preview-macros">
                 <strong>{Math.round(kcal(recipe.nutrientsPerServing) * servings)} kcal</strong>
@@ -230,8 +214,8 @@ export function RecipeEditorPage() {
         const data = new FormData(event.currentTarget)
         save.mutate({
             name: String(data.get('name')),
-            servings: Number(data.get('servings')),
-            finishedWeightG: data.get('yield') ? Number(data.get('yield')) : null,
+            servings: parseDecimal(data.get('servings')),
+            finishedWeightG: data.get('yield') ? parseDecimal(data.get('yield')) : null,
             ingredients: ingredients.map((item) => ({
                 foodRevisionId: item.food.revisionId,
                 quantity: item.quantity,
@@ -267,9 +251,8 @@ export function RecipeEditorPage() {
                         <Field label="Servings">
                             <input
                                 name="servings"
-                                type="number"
-                                min="0.000001"
-                                step="any"
+                                type="text"
+                                inputMode="decimal"
                                 required
                                 defaultValue={recipe.data?.servings || 4}
                             />
@@ -280,9 +263,8 @@ export function RecipeEditorPage() {
                         >
                             <input
                                 name="yield"
-                                type="number"
-                                min="0"
-                                step="any"
+                                type="text"
+                                inputMode="decimal"
                                 defaultValue={recipe.data?.explicitYieldG}
                             />
                         </Field>
@@ -332,19 +314,16 @@ export function RecipeEditorPage() {
                             {ingredients.map((item, index) => (
                                 <div key={item.key}>
                                     <b>{item.food.name}</b>
-                                    <input
+                                    <DecimalInput
                                         aria-label={`${item.food.name} quantity`}
-                                        type="number"
-                                        min="0.000001"
-                                        step="any"
                                         value={item.quantity}
-                                        onChange={(e) =>
+                                        onValue={(value) =>
                                             setIngredients((current) =>
                                                 current.map((entry, i) =>
                                                     i === index
                                                         ? {
                                                               ...entry,
-                                                              quantity: Number(e.target.value),
+                                                              quantity: value ?? 0,
                                                           }
                                                         : entry,
                                                 ),
@@ -353,15 +332,25 @@ export function RecipeEditorPage() {
                                     />
                                     <select
                                         aria-label={`${item.food.name} unit`}
-                                        value={item.unit}
+                                        value={
+                                            item.portionId ? `portion:${item.portionId}` : item.unit
+                                        }
                                         onChange={(e) =>
                                             setIngredients((current) =>
                                                 current.map((entry, i) =>
                                                     i === index
                                                         ? {
                                                               ...entry,
-                                                              unit: e.target.value,
-                                                              portionId: undefined,
+                                                              unit: e.target.value.startsWith(
+                                                                  'portion:',
+                                                              )
+                                                                  ? 'portion'
+                                                                  : e.target.value,
+                                                              portionId: e.target.value.startsWith(
+                                                                  'portion:',
+                                                              )
+                                                                  ? e.target.value.slice(8)
+                                                                  : undefined,
                                                           }
                                                         : entry,
                                                 ),
@@ -370,34 +359,15 @@ export function RecipeEditorPage() {
                                     >
                                         <option value="g">g</option>
                                         <option value="ml">ml</option>
-                                        {item.food.portions.length > 0 && (
-                                            <option value="portion">portion</option>
-                                        )}
+                                        {item.food.portions.map((portion) => (
+                                            <option
+                                                value={`portion:${portion.id}`}
+                                                key={portion.id}
+                                            >
+                                                {portion.name}
+                                            </option>
+                                        ))}
                                     </select>
-                                    {item.unit === 'portion' && (
-                                        <select
-                                            value={item.portionId || ''}
-                                            onChange={(e) =>
-                                                setIngredients((current) =>
-                                                    current.map((entry, i) =>
-                                                        i === index
-                                                            ? {
-                                                                  ...entry,
-                                                                  portionId: e.target.value,
-                                                              }
-                                                            : entry,
-                                                    ),
-                                                )
-                                            }
-                                        >
-                                            <option value="">Choose…</option>
-                                            {item.food.portions.map((portion) => (
-                                                <option key={portion.id} value={portion.id}>
-                                                    {portion.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    )}
                                     <Button
                                         type="button"
                                         variant="ghost"

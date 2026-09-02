@@ -13,10 +13,10 @@ import {
 } from 'lucide-react'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Field, Skeleton, StatePanel, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber, kcal, localDate } from '../lib/utils'
+import { formatNumber, kcal, localDate, parseDecimal } from '../lib/utils'
 import type { Food, Nutrients, Trackable } from '../types'
 import { ScanExperience } from './scan'
 
@@ -26,9 +26,21 @@ type TopTrackMode = Exclude<TrackMode, 'weight'>
 export function TrackPage() {
     const location = useLocation()
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
+    const requestedFoodId = searchParams.get('food') || ''
     const [mode, setMode] = useState<TrackMode>('search')
     const [selected, setSelected] = useState<{ item: Trackable; origin: 'search' | 'scan' }>()
     const from = (location.state as { from?: string } | null)?.from || '/dashboard'
+    const requestedFood = useQuery({
+        queryKey: queryKeys.food(requestedFoodId),
+        queryFn: () => api.food(requestedFoodId),
+        enabled: Boolean(requestedFoodId),
+    })
+    useEffect(() => {
+        if (requestedFood.data && !selected) {
+            setSelected({ item: trackableFood(requestedFood.data), origin: 'search' })
+        }
+    }, [requestedFood.data, selected])
     const close = () => navigate(from, { replace: true })
     useEffect(() => {
         const previousOverflow = document.body.style.overflow
@@ -309,9 +321,8 @@ function AmountForm({
     const toast = useToast()
     const initialized = useRef(false)
     const [amountReady, setAmountReady] = useState(false)
-    const [quantity, setQuantity] = useState<number | ''>('')
-    const [unit, setUnit] = useState(item.type === 'FOOD' ? 'g' : 'serving')
-    const [portionId, setPortionId] = useState('')
+    const [quantity, setQuantity] = useState('')
+    const [unitChoice, setUnitChoice] = useState(item.type === 'FOOD' ? 'g' : 'serving')
     const food = useQuery({
         queryKey: queryKeys.food(item.id),
         queryFn: () => api.food(item.id),
@@ -327,34 +338,41 @@ function AmountForm({
             return
         initialized.current = true
         if (lastAmount.data) {
-            setQuantity(lastAmount.data.quantity)
-            setUnit(lastAmount.data.unit)
-            setPortionId(lastAmount.data.portionId || '')
+            setQuantity(String(lastAmount.data.quantity))
+            setUnitChoice(
+                lastAmount.data.portionId
+                    ? `portion:${lastAmount.data.portionId}`
+                    : lastAmount.data.unit,
+            )
         } else if (food.data) {
-            setQuantity(food.data.basisAmount)
-            setUnit(defaultFoodUnit(food.data))
-            setPortionId(food.data.portions.find((portion) => portion.default)?.id || '')
+            const defaultPortion = food.data.portions.find((portion) => portion.default)
+            setQuantity(String(defaultPortion ? 1 : food.data.basisAmount))
+            setUnitChoice(
+                defaultPortion ? `portion:${defaultPortion.id}` : defaultFoodUnit(food.data),
+            )
         } else {
-            setQuantity(1)
-            setUnit('serving')
+            setQuantity('1')
+            setUnitChoice('serving')
         }
         setAmountReady(true)
     }, [food.data, item.type, lastAmount.data, lastAmount.isPending])
-    const numericQuantity = Number(quantity)
+    const numericQuantity = parseDecimal(quantity)
+    const portionId = unitChoice.startsWith('portion:') ? unitChoice.slice(8) : ''
+    const unit = portionId ? 'portion' : unitChoice
     const resolved = useQuery({
         queryKey: ['resolved-food', item.revisionId, numericQuantity, unit, portionId],
         queryFn: () =>
             api.resolveFood(item.revisionId, {
                 quantity: numericQuantity,
                 unit,
-                portionId: unit === 'portion' ? portionId : null,
+                portionId: portionId || null,
             }),
         enabled:
             item.type === 'FOOD' &&
             amountReady &&
             Number.isFinite(numericQuantity) &&
             numericQuantity > 0 &&
-            (unit !== 'portion' || Boolean(portionId)),
+            Boolean(unit),
     })
     const preview = !amountReady
         ? undefined
@@ -377,7 +395,6 @@ function AmountForm({
         const common = {
             localDate: localDate(trackedAt),
             consumedAt: trackedAt.toISOString(),
-            meal: 'OTHER',
         }
         if (item.type === 'FOOD')
             add.mutate({
@@ -385,7 +402,7 @@ function AmountForm({
                 foodRevisionId: item.revisionId,
                 quantity: numericQuantity,
                 unit,
-                portionId: unit === 'portion' ? portionId : null,
+                portionId: portionId || null,
             })
         else
             add.mutate({
@@ -414,15 +431,11 @@ function AmountForm({
                 <Field label={item.type === 'FOOD' ? 'Amount' : 'Servings'}>
                     <input
                         name="quantity"
-                        type="number"
-                        min="0.000001"
-                        step="any"
+                        type="text"
                         inputMode="decimal"
                         required
                         value={quantity}
-                        onChange={(event) =>
-                            setQuantity(event.target.value === '' ? '' : event.target.valueAsNumber)
-                        }
+                        onChange={(event) => setQuantity(event.target.value)}
                     />
                 </Field>
                 {item.type === 'FOOD' && (
@@ -432,13 +445,11 @@ function AmountForm({
                             {units.map((option) => (
                                 <button
                                     type="button"
-                                    className={unit === option.value ? 'active' : ''}
+                                    className={unitChoice === option.value ? 'active' : ''}
                                     key={option.value}
                                     onClick={() => {
-                                        setUnit(option.value)
-                                        if (option.value === 'portion' && !portionId) {
-                                            setPortionId(food.data?.portions[0]?.id || '')
-                                        }
+                                        setUnitChoice(option.value)
+                                        if (option.value.startsWith('portion:')) setQuantity('1')
                                     }}
                                 >
                                     {option.label}
@@ -446,26 +457,6 @@ function AmountForm({
                             ))}
                         </div>
                     </fieldset>
-                )}
-                {unit === 'portion' && (
-                    <Field label="Portion">
-                        <select
-                            name="portionId"
-                            required
-                            value={portionId}
-                            onChange={(event) => setPortionId(event.target.value)}
-                        >
-                            <option value="">Choose portion…</option>
-                            {food.data?.portions.map((portion) => (
-                                <option value={portion.id} key={portion.id}>
-                                    {portion.name}
-                                    {portion.gramWeight
-                                        ? ` · ${formatNumber(portion.gramWeight)} g`
-                                        : ''}
-                                </option>
-                            ))}
-                        </select>
-                    </Field>
                 )}
                 {resolved.isError && (
                     <p className="field-error">This amount cannot be converted using that unit.</p>
@@ -476,6 +467,7 @@ function AmountForm({
                     disabled={
                         !amountReady ||
                         add.isPending ||
+                        !Number.isFinite(numericQuantity) ||
                         numericQuantity <= 0 ||
                         (item.type === 'FOOD' && !preview)
                     }
@@ -524,7 +516,9 @@ function foodUnits(food: Food) {
     if (food.basisType === 'PER_100_ML' || food.densityGPerMl)
         units.push({ value: 'ml', label: 'ml' })
     if (food.basisType === 'PER_SERVING') units.push({ value: 'serving', label: 'serving' })
-    if (food.portions.length) units.push({ value: 'portion', label: 'portion' })
+    food.portions.forEach((portion) => {
+        units.push({ value: `portion:${portion.id}`, label: portion.name })
+    })
     return units
 }
 
@@ -566,7 +560,6 @@ function QuickEntry({ onDone }: { onDone: () => void }) {
             name: data.get('name'),
             localDate: localDate(trackedAt),
             consumedAt: trackedAt.toISOString(),
-            meal: 'OTHER',
             calories: numberOrNull(data.get('calories')),
             proteinG: number(data.get('protein')),
             carbohydrateG: number(data.get('carbs')),
@@ -583,23 +576,22 @@ function QuickEntry({ onDone }: { onDone: () => void }) {
             <Field label="Calories">
                 <input
                     name="calories"
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Calculated if empty"
                 />
             </Field>
             <Field label="Protein (g)">
-                <input name="protein" type="number" min="0" step="any" defaultValue="0" />
+                <input name="protein" type="text" inputMode="decimal" defaultValue="0" />
             </Field>
             <Field label="Carbs (g)">
-                <input name="carbs" type="number" min="0" step="any" defaultValue="0" />
+                <input name="carbs" type="text" inputMode="decimal" defaultValue="0" />
             </Field>
             <Field label="Fat (g)">
-                <input name="fat" type="number" min="0" step="any" defaultValue="0" />
+                <input name="fat" type="text" inputMode="decimal" defaultValue="0" />
             </Field>
             <Field label="Fiber (g)">
-                <input name="fiber" type="number" min="0" step="any" />
+                <input name="fiber" type="text" inputMode="decimal" />
             </Field>
             <p className="track-now span-2">Logged at the current date and time</p>
             <label className="check span-2">
@@ -630,7 +622,7 @@ function WeightEntry({ onDone }: { onDone: () => void }) {
         event.preventDefault()
         const data = new FormData(event.currentTarget)
         add.mutate({
-            weightKg: Number(data.get('weight')),
+            weightKg: parseDecimal(data.get('weight')),
             measuredAt: new Date().toISOString(),
             note: String(data.get('note') || '') || null,
         })
@@ -638,7 +630,7 @@ function WeightEntry({ onDone }: { onDone: () => void }) {
     return (
         <form className="form-grid quick-track-sheet" onSubmit={submit}>
             <Field label="Weight (kg)" className="span-2">
-                <input name="weight" type="number" min="10" max="700" step="0.1" required />
+                <input name="weight" type="text" inputMode="decimal" required />
             </Field>
             <Field label="Note" className="span-2">
                 <input name="note" maxLength={500} placeholder="Optional" />
@@ -664,6 +656,6 @@ function formatAnchorHour(hour: number) {
     return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(value)
 }
 
-const number = (value: FormDataEntryValue | null) => Number(value || 0)
+const number = (value: FormDataEntryValue | null) => parseDecimal(value || 0)
 const numberOrNull = (value: FormDataEntryValue | null) =>
-    value === '' || value == null ? null : Number(value)
+    value === '' || value == null ? null : parseDecimal(value)

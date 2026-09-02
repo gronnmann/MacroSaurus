@@ -1,4 +1,5 @@
 import type {
+    AdminUser,
     BarcodeCandidate,
     CheckIn,
     CoachingSetupDraft,
@@ -11,6 +12,7 @@ import type {
     FoodInput,
     GoalSettings,
     LastTrackedAmount,
+    MyFeatures,
     NutrientDefinition,
     NutrientTarget,
     NutritionDayReview,
@@ -74,6 +76,14 @@ const body = (value: unknown) => JSON.stringify(value)
 export const api = {
     nutrients: () => request<NutrientDefinition[]>('/nutrients'),
     profile: () => request<Profile>('/me/profile'),
+    features: () => request<MyFeatures>('/me/features'),
+    adminUsers: (query = '') =>
+        request<AdminUser[]>(`/admin/users?query=${encodeURIComponent(query)}`),
+    setAiLabelScan: (userId: string, enabled: boolean) =>
+        request<AdminUser>(`/admin/users/${encodeURIComponent(userId)}/features/ai-label-scan`, {
+            method: 'PUT',
+            body: body({ enabled }),
+        }),
     updateProfile: (input: Omit<Profile, 'userId'>) =>
         request<Profile>('/me/profile', { method: 'PUT', body: body(input) }),
     coachingStatus: () => request<CoachingStatus>('/me/coaching/status'),
@@ -221,6 +231,8 @@ export const api = {
 export const queryKeys = {
     nutrients: ['nutrients'] as const,
     profile: ['profile'] as const,
+    features: ['features'] as const,
+    adminUsers: (query: string) => ['admin-users', query] as const,
     coachingStatus: ['coaching-status'] as const,
     setupDraft: ['coaching-setup-draft'] as const,
     checkIn: ['coaching-check-in'] as const,

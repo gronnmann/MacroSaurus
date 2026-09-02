@@ -7,6 +7,9 @@ import com.macrosaurus.catalog.FoodCatalog
 import com.macrosaurus.catalog.FoodCreator
 import com.macrosaurus.catalog.FoodDraft
 import com.macrosaurus.catalog.FoodSnapshot
+import com.macrosaurus.identity.UserFeature
+import com.macrosaurus.identity.UserFeatureReader
+import com.macrosaurus.shared.ForbiddenException
 import com.macrosaurus.shared.InvalidOperationException
 import com.macrosaurus.shared.NotFoundException
 import org.springframework.stereotype.Service
@@ -63,12 +66,14 @@ internal class ScanService(
     private val repository: JooqScanJobRepository,
     private val extractor: LabelExtractor,
     private val foodCreator: FoodCreator,
+    private val features: UserFeatureReader,
     private val clock: Clock,
 ) {
     fun start(
         userId: String,
         command: StartLabelScanCommand,
     ): ScanJob {
+        requireAccess(userId)
         val id = UUID.randomUUID()
         val expires = OffsetDateTime.now(clock).plusHours(24)
         repository.insertProcessing(id, userId, expires)
@@ -85,7 +90,10 @@ internal class ScanService(
     fun get(
         userId: String,
         id: UUID,
-    ): ScanJob = repository.find(userId, id) ?: throw NotFoundException("Scan was not found")
+    ): ScanJob {
+        requireAccess(userId)
+        return repository.find(userId, id) ?: throw NotFoundException("Scan was not found")
+    }
 
     @Transactional
     fun confirm(
@@ -93,10 +101,17 @@ internal class ScanService(
         id: UUID,
         draft: FoodDraft,
     ): FoodSnapshot {
+        requireAccess(userId)
         val job = get(userId, id)
         if (job.status != "REVIEW") throw InvalidOperationException("Only scans awaiting review can be confirmed")
         val food = foodCreator.create(userId, draft)
         repository.markConfirmed(userId, id)
         return food
+    }
+
+    private fun requireAccess(userId: String) {
+        if (!features.enabled(userId, UserFeature.AI_LABEL_SCAN)) {
+            throw ForbiddenException("AI label scanning is not enabled for this user")
+        }
     }
 }

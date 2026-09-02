@@ -22,7 +22,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatDate, formatNumber, today } from '../lib/utils'
+import { formatDate, formatNumber, parseDecimal, today } from '../lib/utils'
 import type { ProgressSeriesPoint, Weight } from '../types'
 
 export function ProgressPage() {
@@ -68,7 +68,7 @@ export function ProgressPage() {
         event.preventDefault()
         const data = new FormData(event.currentTarget)
         add.mutate({
-            weightKg: Number(data.get('weight')),
+            weightKg: parseDecimal(data.get('weight')),
             measuredAt: data.get('measuredAt')
                 ? new Date(String(data.get('measuredAt'))).toISOString()
                 : undefined,
@@ -100,14 +100,7 @@ export function ProgressPage() {
                             {series.data && <WeightTrendChart points={series.data} />}
                             <form className="weight-form" onSubmit={submit}>
                                 <Field label="Weight (kg)">
-                                    <input
-                                        name="weight"
-                                        type="number"
-                                        min="10"
-                                        max="700"
-                                        step="0.1"
-                                        required
-                                    />
+                                    <input name="weight" type="text" inputMode="decimal" required />
                                 </Field>
                                 <Field label="Measured at">
                                     <input name="measuredAt" type="datetime-local" />

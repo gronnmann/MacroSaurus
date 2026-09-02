@@ -274,7 +274,13 @@ async function main() {
 
     let release
     if (kind === 'matvaretabellen') {
-        const [english, norwegian] = await Promise.all([fetchBuffer(MATVARE_URLS.en), fetchBuffer(MATVARE_URLS.nb)])
+        const hasLocalInputs = options['input-en'] || options['input-nb']
+        if (hasLocalInputs && (!options['input-en'] || !options['input-nb'])) {
+            throw new Error('matvaretabellen requires both --input-en and --input-nb')
+        }
+        const [english, norwegian] = hasLocalInputs
+            ? await Promise.all([readFile(options['input-en']), readFile(options['input-nb'])])
+            : await Promise.all([fetchBuffer(MATVARE_URLS.en), fetchBuffer(MATVARE_URLS.nb)])
         release = prepareMatvareRelease(JSON.parse(english), JSON.parse(norwegian), options.release, checksumOf(english, norwegian))
     } else if (kind === 'usda-foundation' || kind === 'usda-sr-legacy') {
         if (!options.input) throw new Error(`${kind} requires --input <extracted USDA JSON file>`)

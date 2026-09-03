@@ -173,7 +173,7 @@ cross-feature dependency.
 
 ## Data and integrations
 
-- Versioned food releases can be seeded directly into PostgreSQL from USDA FoodData Central and Matvaretabellen.
+- [`scripts/seed.py`](scripts/seed.py) seeds versioned USDA FoodData Central and Matvaretabellen releases directly into PostgreSQL.
 - Exact barcode matches can be imported from Open Food Facts.
 - User-created foods are private unless deliberately shared.
 - Admin-granted users can extract a reviewed nutrition draft from one label image

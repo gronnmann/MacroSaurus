@@ -1,21 +1,17 @@
 package com.macrosaurus.catalog.application
 
-import com.macrosaurus.catalog.CatalogImportResult
-import com.macrosaurus.catalog.CatalogImporter
 import com.macrosaurus.catalog.FoodAmount
 import com.macrosaurus.catalog.FoodCatalog
 import com.macrosaurus.catalog.FoodCreator
 import com.macrosaurus.catalog.FoodDraft
 import com.macrosaurus.catalog.FoodResolver
 import com.macrosaurus.catalog.FoodSnapshot
-import com.macrosaurus.catalog.ImportedFood
 import com.macrosaurus.catalog.NutrientCatalog
 import com.macrosaurus.catalog.NutrientDefinition
 import com.macrosaurus.catalog.ResolvedFoodAmount
 import com.macrosaurus.catalog.SourceKind
 import com.macrosaurus.catalog.domain.FoodAmountResolver
 import com.macrosaurus.catalog.persistence.JooqCatalogRepository
-import com.macrosaurus.shared.InvalidOperationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -26,8 +22,7 @@ internal class CatalogService(
 ) : NutrientCatalog,
     FoodCatalog,
     FoodResolver,
-    FoodCreator,
-    CatalogImporter {
+    FoodCreator {
     override fun nutrients(): List<NutrientDefinition> = repository.nutrients()
 
     override fun search(
@@ -76,23 +71,4 @@ internal class CatalogService(
         revisionId: UUID,
         amount: FoodAmount,
     ): ResolvedFoodAmount = FoodAmountResolver.resolve(repository.byRevision(userId, revisionId), amount)
-
-    @Transactional
-    override fun importRelease(
-        source: SourceKind,
-        releaseKey: String,
-        checksum: String,
-        foods: List<ImportedFood>,
-    ): CatalogImportResult {
-        if (source !in setOf(SourceKind.MATVARETABELLEN, SourceKind.USDA_FOUNDATION, SourceKind.USDA_SR_LEGACY)) {
-            throw InvalidOperationException("Only Matvaretabellen, USDA Foundation, and USDA SR Legacy releases can be bulk imported")
-        }
-        if (releaseKey.isBlank() || checksum.isBlank()) throw InvalidOperationException("Release key and checksum are required")
-        if (foods.isEmpty()) throw InvalidOperationException("An import release must contain foods")
-        if (foods.size > 100_000) throw InvalidOperationException("A single import is limited to 100,000 foods")
-        if (foods.map { it.externalId }.any(String::isBlank) || foods.map { it.externalId }.toSet().size != foods.size) {
-            throw InvalidOperationException("Imported foods need unique external IDs")
-        }
-        return repository.importRelease(source, releaseKey.trim(), checksum.trim(), foods)
-    }
 }

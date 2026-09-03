@@ -1,8 +1,6 @@
 package com.macrosaurus.catalog
 
 import com.macrosaurus.shared.NutrientValues
-import java.io.InputStream
-import java.io.OutputStream
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -129,42 +127,4 @@ interface FoodCreator {
         source: SourceKind = SourceKind.USER,
         externalId: String? = null,
     ): FoodSnapshot
-}
-
-data class ImportedFood(
-    val externalId: String,
-    val name: String,
-    val brand: String? = null,
-    val barcode: String? = null,
-    val locale: String? = null,
-    val aliases: Map<String, String> = emptyMap(),
-    val basisType: BasisType = BasisType.PER_100_G,
-    val basisAmount: BigDecimal = BigDecimal("100"),
-    val basisUnit: String = "g",
-    val densityGPerMl: BigDecimal? = null,
-    val nutrients: Map<String, BigDecimal>,
-    val portions: List<PortionDraft> = emptyList(),
-)
-
-data class CatalogImportResult(
-    val source: SourceKind,
-    val releaseKey: String,
-    val importedCount: Int,
-    val alreadyImported: Boolean,
-)
-
-interface CatalogImporter {
-    fun importRelease(
-        source: SourceKind,
-        releaseKey: String,
-        checksum: String,
-        foods: List<ImportedFood>,
-    ): CatalogImportResult
-}
-
-interface CatalogImportCommand {
-    fun execute(
-        input: InputStream,
-        output: OutputStream,
-    )
 }

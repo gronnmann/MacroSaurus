@@ -7,40 +7,30 @@
 Migration `V2__seed_nutrients_and_foods.sql` includes three representative USDA
 foods and common nutrient definitions so the app works immediately.
 
-The direct catalog importer accepts `USDA_FOUNDATION` and `USDA_SR_LEGACY`
-normalized releases. Use the Foundation April 2026 and SR Legacy April 2018 JSON
-downloads, excluding Branded and FNDDS data. On a production host, download,
-prepare, and import selected datasets independently of deployment:
+The seed script imports USDA Foundation April 2026 and SR Legacy April 2018,
+excluding Branded and FNDDS data. Run it independently of deployment:
 
 ```sh
-./scripts/seed.sh --source usda
-./scripts/seed.sh --source matvaretabellen
-./scripts/seed.sh --source both
+./scripts/seed.py --source usda
+./scripts/seed.py --source matvaretabellen
+./scripts/seed.py --source both
 ```
 
-`both` is the default. USDA includes both Foundation and SR Legacy. The operation
-is independent of deployment and does not need the application to be running, an
-application user, or an access token. The script downloads and normalizes data
-in a temporary Node container, then pipes one normalized release at a time into
-a database-only one-off container using the configured production backend image
-and database credentials. The process starts only the datasource, jOOQ, Jackson,
-and catalog services; it does not start a web server, load authentication, or
-upload the release over HTTP.
+`both` is the default. USDA includes both Foundation and SR Legacy. The one
+Python file downloads, verifies, normalizes, and imports the releases directly
+through PostgreSQL. It reads `DATABASE_URL`, `DATABASE_USERNAME`, and
+`DATABASE_PASSWORD` from `.env.production` (or the process environment), and
+does not use Docker, Java, the running application, or an access token.
 
-For manual preparation, extract the USDA archives and run:
+Install either supported PostgreSQL Python driver on the host:
 
 ```sh
-node scripts/prepare-catalog-release.mjs usda-foundation \
-  --release 2026-04 --input FoodData_Central_foundation_food_json_2026-04-30.json \
-  --output foundation-2026-04.json
-node scripts/prepare-catalog-release.mjs usda-sr-legacy \
-  --release 2018-04 --input FoodData_Central_sr_legacy_food_json_2018-04.json \
-  --output sr-legacy-2018-04.json
+sudo apt install python3-psycopg       # Ubuntu 24.04+
+sudo apt install python3-psycopg2      # Ubuntu 22.04
 ```
 
-The preparer requires the matching official `FoundationFoods` or
-`SRLegacyFoods` root key, so a Branded or FNDDS export cannot be imported by
-accident.
+The importer validates the expected `FoundationFoods` or `SRLegacyFoods` root,
+so a Branded or FNDDS export cannot be imported by accident.
 Each run:
 
 1. Requires a pinned release key and checksum.
@@ -54,48 +44,25 @@ should still be shown in product and API surfaces.
 
 ## Matvaretabellen
 
-The same direct importer accepts `MATVARETABELLEN` releases. The preparer downloads
-the official English and Norwegian Bokmål API exports together, keeps English as
-the display name, and adds the Bokmål name as a searchable alias:
-
-```sh
-node scripts/prepare-catalog-release.mjs matvaretabellen \
-  --release 2026 --output matvaretabellen-2026.json
-```
+For Matvaretabellen, the script downloads the official English and Norwegian
+Bokmål API exports together, keeps English as the display name, and adds the
+Bokmål name as a searchable alias.
 
 It maps Matvaretabellen nutrient IDs and named gram portions, preserves the food
 identifier as `externalId`, and computes a checksum over both raw exports. Keep
 the required Matvaretabellen attribution in deployments that redistribute the
 data.
 
-The importer input is a normalized release:
+Replaying the same source/release/checksum is idempotent. Each release is one
+transaction and its rows are written in batches. USDA Foundation, USDA SR Legacy,
+and Matvaretabellen remain separate releases so they can be retried and updated
+independently. If a run stops partway through, rerun the same command: completed
+releases are skipped and the current transaction is rolled back and retried.
 
-```json
-{
-  "source": "MATVARETABELLEN",
-  "releaseKey": "2026",
-  "checksum": "sha256:…",
-  "foods": [{
-    "externalId": "food-id",
-    "name": "Oatmeal",
-    "locale": "en",
-    "aliases": { "nb": "Havregrøt" },
-    "basisType": "PER_100_G",
-    "basisAmount": 100,
-    "basisUnit": "g",
-    "nutrients": { "energy_kcal": 71, "protein_g": 2.5 },
-    "portions": [{ "name": "1 bowl", "gramWeight": 250, "default": true }]
-  }]
-}
-```
-
-The seed script sends this JSON over stdin to `/app/app.jar` in database-only
-catalog-import mode. Replaying the same source/release/checksum is idempotent.
-Each normalized release is imported in one transaction, with its food and
-nutrient rows written in database batches. USDA Foundation, USDA SR Legacy, and
-Matvaretabellen remain separate releases so they can be retried and updated
-independently. If a multi-source run stops partway through, rerun the same
-command: completed releases are skipped and the failed release is retried.
+Dataset URLs and release keys can be overridden with the `USDA_FOUNDATION_*`,
+`USDA_SR_LEGACY_*`, and `MATVARETABELLEN_*` environment variables listed in
+[`scripts/seed.py`](../scripts/seed.py). Use `--env-file PATH` to read a different
+environment file.
 
 ## Open Food Facts
 

@@ -31,6 +31,8 @@ repository, then install the host reverse proxy and Certbot:
 ```bash
 sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx
+# Ubuntu 24.04 and newer (use python3-psycopg2 on Ubuntu 22.04):
+sudo apt install -y python3-psycopg
 docker version
 docker compose version
 ```
@@ -128,20 +130,21 @@ docker compose --env-file .env.production -f compose.production.yml logs -f back
 curl --fail http://127.0.0.1:8080/
 ```
 
-Seed public food catalogs separately from deployment. This starts a database-only
-one-off container using the backend image and configured database credentials,
-then writes through the same transactional catalog service directly to
-PostgreSQL. It does not require the application services to be running, start a
-server, or use the catalog HTTP API:
+Seed public food catalogs separately from deployment. The Python script reads the
+database credentials from `.env.production`, downloads the selected datasets,
+and writes directly to PostgreSQL. It does not use Docker, start the backend, or
+make application HTTP requests:
 
 ```bash
-./scripts/seed.sh --source both
+./scripts/seed.py --source both
 ```
 
 Use `usda` or `matvaretabellen` instead of `both` to update only that source.
 The command is idempotent for an unchanged release and does not require a user
-access token. See [Integrations](integrations.md) for release overrides and
-source-specific behavior.
+access token. Ubuntu 22.04 calls the compatible database-driver package
+`python3-psycopg2`; install that instead if `python3-psycopg` is unavailable.
+See [Integrations](integrations.md) for release overrides and source-specific
+behavior.
 
 ## 6. Put HTTPS in front of the containers
 

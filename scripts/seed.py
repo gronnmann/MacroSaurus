@@ -370,9 +370,17 @@ def batches(rows: list[tuple[Any, ...]]) -> Iterable[list[tuple[Any, ...]]]:
         yield rows[start : start + BATCH_SIZE]
 
 
-def execute_many(cursor: Any, sql: str, rows: list[tuple[Any, ...]]) -> None:
+def execute_values(
+    cursor: Any,
+    prefix: str,
+    row_template: str,
+    rows: list[tuple[Any, ...]],
+    suffix: str = "",
+) -> None:
     for batch in batches(rows):
-        cursor.executemany(sql, batch)
+        placeholders = ",".join(row_template for _ in batch)
+        parameters = [value for row in batch for value in row]
+        cursor.execute(f"{prefix} {placeholders} {suffix}", parameters)
 
 
 def import_release(connection: Any, release: Release) -> None:
@@ -425,32 +433,51 @@ def import_release(connection: Any, release: Release) -> None:
             )
             cursor.execute("update foods set active = false where source_kind = %s", (release.source,))
 
-            execute_many(
-                cursor,
-                "insert into foods(id, source_kind, external_id, barcode, active) values (%s, %s, %s, null, true)",
-                [(food_id, release.source, food.external_id) for food, food_id, _, _, exists in prepared if not exists],
+            new_food_rows = [
+                (food_id, release.source, food.external_id)
+                for food, food_id, _, _, exists in prepared
+                if not exists
+            ]
+            existing_food_rows = [(food_id,) for _, food_id, _, _, exists in prepared if exists]
+            print(
+                f"  writing {len(new_food_rows)} new and {len(existing_food_rows)} existing foods...",
+                flush=True,
             )
-            execute_many(
+            execute_values(
                 cursor,
-                "update foods set barcode = null, active = true where id = %s",
-                [(food_id,) for _, food_id, _, _, exists in prepared if exists],
+                "insert into foods(id, source_kind, external_id, barcode, active) values",
+                "(%s, %s, %s, null, true)",
+                new_food_rows,
             )
-            execute_many(
+            execute_values(
+                cursor,
+                "update foods as food set barcode = null, active = true from (values",
+                "(%s::uuid)",
+                existing_food_rows,
+                ") as changed(id) where food.id = changed.id",
+            )
+            revision_rows = [
+                (revision_id, food_id, revision, food.name, release_id, food.locale)
+                for food, food_id, revision_id, revision, _ in prepared
+            ]
+            print(f"  writing {len(revision_rows)} revisions...", flush=True)
+            execute_values(
                 cursor,
                 "insert into food_revisions(id, food_id, revision, name, brand, basis_type, basis_amount, "
-                "basis_unit, density_g_per_ml, source_release_id, locale) "
-                "values (%s, %s, %s, %s, null, 'PER_100_G', 100, 'g', null, %s, %s)",
-                [(revision_id, food_id, revision, food.name, release_id, food.locale) for food, food_id, revision_id, revision, _ in prepared],
+                "basis_unit, density_g_per_ml, source_release_id, locale) values",
+                "(%s, %s, %s, %s, null, 'PER_100_G', 100, 'g', null, %s, %s)",
+                revision_rows,
             )
             nutrient_rows = [
                 (revision_id, code, amount)
                 for food, _, revision_id, _, _ in prepared
                 for code, amount in food.nutrients.items()
             ]
-            execute_many(
+            print(f"  writing {len(nutrient_rows)} nutrient values...", flush=True)
+            execute_values(
                 cursor,
-                "insert into food_nutrients(food_revision_id, nutrient_code, amount, value_kind) "
-                "values (%s, %s, %s, 'REPORTED')",
+                "insert into food_nutrients(food_revision_id, nutrient_code, amount, value_kind) values",
+                "(%s, %s, %s, 'REPORTED')",
                 nutrient_rows,
             )
             portion_rows = [
@@ -458,10 +485,11 @@ def import_release(connection: Any, release: Release) -> None:
                 for food, _, revision_id, _, _ in prepared
                 for portion in food.portions
             ]
-            execute_many(
+            print(f"  writing {len(portion_rows)} portions...", flush=True)
+            execute_values(
                 cursor,
-                "insert into portions(id, food_revision_id, name, quantity, gram_weight, is_default) "
-                "values (%s, %s, %s, 1, %s, %s)",
+                "insert into portions(id, food_revision_id, name, quantity, gram_weight, is_default) values",
+                "(%s, %s, %s, 1, %s, %s)",
                 portion_rows,
             )
             cursor.execute(
@@ -474,10 +502,13 @@ def import_release(connection: Any, release: Release) -> None:
                 for locale, name in food.aliases.items()
                 if locale.strip() and name.strip()
             ]
-            execute_many(
+            print(f"  writing {len(alias_rows)} aliases...", flush=True)
+            execute_values(
                 cursor,
-                "insert into food_aliases(food_id, locale, name) values (%s, %s, %s) on conflict do nothing",
+                "insert into food_aliases(food_id, locale, name) values",
+                "(%s, %s, %s)",
                 alias_rows,
+                "on conflict do nothing",
             )
             cursor.execute(
                 "update food_source_releases set status = 'COMPLETED', record_count = %s, "

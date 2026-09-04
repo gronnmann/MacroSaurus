@@ -25,6 +25,8 @@ them through the deployment platform, or map them through an IDE run profile.
 | `OPENROUTER_CONNECT_TIMEOUT` | `5s` | No | No | OpenRouter connection timeout |
 | `OPENROUTER_READ_TIMEOUT` | `90s` | No | No | OpenRouter extraction response timeout |
 | `DEV_AUTH_ENABLED` | `true` | Local only | No | Enables development identity; production forces this off |
+| `BACKEND_MEMORY_LIMIT` | `512m` | Production | No | Hard memory limit for the backend container |
+| `BACKEND_JAVA_TOOL_OPTIONS` | `-XX:MaxRAMPercentage=50.0` | Production | No | JVM options injected into the memory-limited backend container |
 
 PowerShell example:
 
@@ -86,6 +88,20 @@ configured `VITE_DEV_USER_ID` while backend development identity is enabled.
 The publishable key is intentionally embedded in the browser build. Never put a
 Supabase secret or service-role key in a `VITE_` variable or in the backend; the
 backend needs only the project URL and PostgreSQL credentials.
+
+## Production memory
+
+The production Compose service limits the backend container to 512 MiB and lets
+the JVM use at most half of that amount for the Java heap. This leaves room for
+class metadata, thread stacks, compiled code, the garbage collector, and other
+native allocations. The production profile also keeps one idle database
+connection (up to four under load) and two spare Tomcat request threads (up to
+16 under load), which is appropriate for the expected small private deployment.
+
+Set `BACKEND_MEMORY_LIMIT=768m` if monitoring shows an out-of-memory kill or
+sustained memory pressure. Keep `BACKEND_JAVA_TOOL_OPTIONS` scoped to the
+backend; do not restore the old host-relative `JAVA_TOOL_OPTIONS` wiring, which
+allowed an unbounded container to size its heap from all host-visible RAM.
 
 ## CORS
 

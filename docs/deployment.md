@@ -64,6 +64,10 @@ Edit every placeholder in `.env.production`. In particular:
 - Replace the Open Food Facts contact placeholder.
 - Leave `OPENROUTER_API_KEY` blank only when label extraction is intentionally
   disabled.
+- Keep the default 512 MiB backend limit and 50% JVM heap share for a small
+  private deployment. Raise `BACKEND_MEMORY_LIMIT` to `768m` if production
+  monitoring shows memory pressure; do not use the legacy `JAVA_TOOL_OPTIONS`
+  variable, which is no longer consumed by the production Compose service.
 
 The production Spring profile disables development identity and refuses to
 start without an absolute HTTPS Supabase project URL. Never commit
@@ -221,6 +225,10 @@ instance when a migration itself must be rolled back.
 
 - Monitor container restarts, readiness, HTTP error rate, latency, and managed
   PostgreSQL storage/connections.
+- Monitor backend memory with `docker stats` and check
+  `docker inspect --format '{{.State.OOMKilled}}' <backend-container>` after an
+  unexpected restart. A settled small deployment should normally remain around
+  250-350 MiB; an OOM kill is a reason to raise `BACKEND_MEMORY_LIMIT` to 768 MiB.
 - Test database restore procedures regularly; a configured backup is not enough.
 - Rotate database and provider credentials and exercise the Supabase signing-key
   rotation procedure without deploying private signing material.

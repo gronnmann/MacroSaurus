@@ -4,6 +4,18 @@ macrosaurus:
     audience: authenticated
     dev-mode: false
 
+spring:
+  datasource:
+    hikari:
+      minimum-idle: 1
+      maximum-pool-size: 4
+
+server:
+  tomcat:
+    threads:
+      min-spare: 2
+      max: 16
+
 management:
   endpoints:
     web:

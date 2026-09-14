@@ -54,6 +54,7 @@ internal class BarcodeService(
                 basisAmount = BigDecimal("100"),
                 basisUnit = if (candidate.basisType == BasisType.PER_100_ML) "ml" else "g",
                 nutrients = candidate.nutrients,
+                portions = candidate.portions,
             ),
             candidate.source,
             candidate.externalId,

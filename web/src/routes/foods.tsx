@@ -6,6 +6,11 @@ import { FoodForm } from '../components/food-form'
 import { NutrientFacts } from '../components/nutrition'
 import { ShareButton } from '../components/share'
 import {
+    initialTrackingWhen,
+    TrackingWhenFields,
+    trackingTimestamp,
+} from '../components/tracking-when'
+import {
     Badge,
     Button,
     Card,
@@ -17,7 +22,7 @@ import {
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
 import { prepareLabelImage } from '../lib/image'
-import { formatNumber, kcal, parseDecimal, today } from '../lib/utils'
+import { formatNumber, kcal, parseDecimal } from '../lib/utils'
 import type { Food, FoodInput } from '../types'
 
 export function FoodDetailPage() {
@@ -99,6 +104,7 @@ export function FoodDetailPage() {
 }
 
 function FoodLogger({ food }: { food: Food }) {
+    const [when, setWhen] = useState(initialTrackingWhen)
     const defaultPortion = food.portions.find((portion) => portion.default) || food.portions[0]
     const [quantity, setQuantity] = useState(String(defaultPortion ? 1 : food.basisAmount))
     const [unitChoice, setUnitChoice] = useState(
@@ -123,16 +129,22 @@ function FoodLogger({ food }: { food: Food }) {
             api.addFoodEntry({
                 foodRevisionId: food.revisionId,
                 ...request,
-                localDate: today(),
+                ...trackingTimestamp(when),
             }),
         onSuccess: () => {
             client.invalidateQueries({ queryKey: ['diary'] })
-            toast.push('Food added to today', food.name)
+            toast.push('Food added to Food Log', food.name)
         },
         onError: (error) => toast.push('Could not log food', error.message, 'error'),
     })
     return (
-        <div className="logger">
+        <form
+            className="logger"
+            onSubmit={(event) => {
+                event.preventDefault()
+                log.mutate()
+            }}
+        >
             <div className="quantity-row">
                 <input
                     aria-label="Quantity"
@@ -178,10 +190,19 @@ function FoodLogger({ food }: { food: Food }) {
                 </div>
             )}
             {preview.error && <p className="field-error">{preview.error.message}</p>}
-            <Button disabled={!preview.data || log.isPending} onClick={() => log.mutate()}>
-                {log.isPending ? 'Adding…' : 'Add to today'}
+            <TrackingWhenFields value={when} onChange={setWhen} />
+            <Button
+                type="submit"
+                disabled={
+                    !preview.data ||
+                    log.isPending ||
+                    !Number.isFinite(numericQuantity) ||
+                    numericQuantity <= 0
+                }
+            >
+                {log.isPending ? 'Adding…' : 'Add to Food Log'}
             </Button>
-        </div>
+        </form>
     )
 }
 

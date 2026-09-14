@@ -1,10 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Pencil, Plus, Trash2 } from 'lucide-react'
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { DecimalInput } from '../components/decimal-input'
 import { NutrientFacts } from '../components/nutrition'
 import { ShareButton } from '../components/share'
+import {
+    initialTrackingWhen,
+    TrackingWhenFields,
+    trackingTimestamp,
+} from '../components/tracking-when'
 import {
     Button,
     Card,
@@ -17,8 +22,9 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber, kcal, parseDecimal, today } from '../lib/utils'
+import { formatNumber, kcal, parseDecimal } from '../lib/utils'
 import type { Food, Recipe, RecipeInput } from '../types'
+import { foodUnits, type IngredientSelection, TrackSheet } from './track'
 
 export function RecipeDetailPage() {
     const { id = '' } = useParams()
@@ -108,6 +114,7 @@ export function RecipeDetailPage() {
 
 function RecipeLogger({ recipe }: { recipe: Recipe }) {
     const [servings, setServings] = useState(1)
+    const [when, setWhen] = useState(initialTrackingWhen)
     const toast = useToast()
     const client = useQueryClient()
     const log = useMutation({
@@ -115,16 +122,22 @@ function RecipeLogger({ recipe }: { recipe: Recipe }) {
             api.addRecipeEntry({
                 recipeRevisionId: recipe.revisionId,
                 servings,
-                localDate: today(),
+                ...trackingTimestamp(when),
             }),
         onSuccess: () => {
             client.invalidateQueries({ queryKey: ['diary'] })
-            toast.push('Recipe added to today', recipe.name)
+            toast.push('Recipe added to Food Log', recipe.name)
         },
         onError: (error) => toast.push('Could not log recipe', error.message, 'error'),
     })
     return (
-        <div className="logger">
+        <form
+            className="logger"
+            onSubmit={(event) => {
+                event.preventDefault()
+                log.mutate()
+            }}
+        >
             <Field label="Servings">
                 <DecimalInput value={servings} onValue={(value) => setServings(value ?? 0)} />
             </Field>
@@ -136,10 +149,14 @@ function RecipeLogger({ recipe }: { recipe: Recipe }) {
                     {formatNumber(recipe.nutrientsPerServing.fat_g * servings)}
                 </span>
             </div>
-            <Button onClick={() => log.mutate()} disabled={log.isPending}>
-                Add to today
+            <TrackingWhenFields value={when} onChange={setWhen} />
+            <Button
+                type="submit"
+                disabled={log.isPending || !Number.isFinite(servings) || servings <= 0}
+            >
+                Add to Food Log
             </Button>
-        </div>
+        </form>
     )
 }
 
@@ -161,44 +178,46 @@ export function RecipeEditorPage() {
         enabled: !!id,
     })
     const [ingredients, setIngredients] = useState<DraftIngredient[]>([])
-    const [search, setSearch] = useState('')
-    const foods = useQuery({
-        queryKey: queryKeys.foods(search),
-        queryFn: () => api.foods(search),
-    })
+    const [addingIngredient, setAddingIngredient] = useState(false)
+    const initializedRecipe = useRef<string | undefined>(undefined)
+    const [loadingIngredients, setLoadingIngredients] = useState(Boolean(id))
+    const [ingredientError, setIngredientError] = useState<Error>()
     useEffect(() => {
-        if (!recipe.data || ingredients.length) return
+        if (!recipe.data || initializedRecipe.current === recipe.data.revisionId) return
+        let cancelled = false
+        setLoadingIngredients(true)
         const currentRecipe = recipe.data
         Promise.all(
-            currentRecipe.ingredients.map(async (item) => {
-                const found = (await api.foods(item.name, 100)).find(
-                    (food) => food.revisionId === item.foodRevisionId,
-                )
-                const fallback: Food = {
-                    id: item.foodRevisionId,
-                    revisionId: item.foodRevisionId,
-                    revision: 1,
-                    name: item.name,
-                    source: 'USER',
-                    basisType: 'PER_100_G',
-                    basisAmount: 100,
-                    basisUnit: 'g',
-                    nutrients: item.nutrients,
-                    portions: [],
-                    createdAt: currentRecipe.createdAt,
-                }
-                return {
-                    key: item.id,
-                    food: found || fallback,
-                    quantity: item.quantity,
-                    unit: item.unit,
-                    portionId: item.portionId,
-                }
-            }),
+            currentRecipe.ingredients.map(async (item) => ({
+                key: item.id,
+                food: await api.foodRevision(item.foodRevisionId),
+                quantity: item.quantity,
+                unit: item.unit,
+                portionId: item.portionId,
+            })),
         )
-            .then(setIngredients)
-            .catch(() => undefined)
-    }, [recipe.data, ingredients.length])
+            .then((items) => {
+                if (!cancelled) {
+                    initializedRecipe.current = currentRecipe.revisionId
+                    setIngredients(items)
+                    setLoadingIngredients(false)
+                }
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setIngredientError(error)
+                    setLoadingIngredients(false)
+                }
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [recipe.data])
+    const addIngredients = (items: IngredientSelection[]) =>
+        setIngredients((current) => [
+            ...current,
+            ...items.map((item) => ({ ...item, key: crypto.randomUUID() })),
+        ])
     const save = useMutation({
         mutationFn: (input: RecipeInput) =>
             id ? api.updateRecipe(id, input) : api.createRecipe(input),
@@ -225,6 +244,8 @@ export function RecipeEditorPage() {
         })
     }
     if (id && recipe.isLoading) return <Skeleton lines={8} />
+    if (id && (recipe.error || ingredientError))
+        return <ErrorPanel error={recipe.error || ingredientError} />
     return (
         <>
             <Link className="back-link" to={id ? `/recipes/${id}` : '/track'}>
@@ -276,39 +297,16 @@ export function RecipeEditorPage() {
                         title="Ingredients"
                         aside={`${ingredients.length} added`}
                     />
-                    <label className="search-field">
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={loadingIngredients}
+                        onClick={() => setAddingIngredient(true)}
+                    >
                         <Plus />
-                        <input
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Find an ingredient…"
-                        />
-                    </label>
-                    <div className="ingredient-results">
-                        {foods.data?.slice(0, 6).map((food) => (
-                            <button
-                                type="button"
-                                key={food.id}
-                                onClick={() =>
-                                    setIngredients((current) => [
-                                        ...current,
-                                        {
-                                            key: crypto.randomUUID(),
-                                            food,
-                                            quantity: 100,
-                                            unit: 'g',
-                                        },
-                                    ])
-                                }
-                            >
-                                <span>
-                                    <b>{food.name}</b>
-                                    <small>{food.brand || 'No brand'}</small>
-                                </span>
-                                <Plus />
-                            </button>
-                        ))}
-                    </div>
+                        Add ingredient
+                    </Button>
+                    {loadingIngredients && <Skeleton lines={3} />}
                     {ingredients.length ? (
                         <div className="recipe-editor-list">
                             {ingredients.map((item, index) => (
@@ -357,14 +355,9 @@ export function RecipeEditorPage() {
                                             )
                                         }
                                     >
-                                        <option value="g">g</option>
-                                        <option value="ml">ml</option>
-                                        {item.food.portions.map((portion) => (
-                                            <option
-                                                value={`portion:${portion.id}`}
-                                                key={portion.id}
-                                            >
-                                                {portion.name}
+                                        {foodUnits(item.food).map((unit) => (
+                                            <option value={unit.value} key={unit.value}>
+                                                {unit.label}
                                             </option>
                                         ))}
                                     </select>
@@ -393,11 +386,27 @@ export function RecipeEditorPage() {
                 </Card>
                 <div className="sticky-actions">
                     <span>Past Food Log entries stay as recorded.</span>
-                    <Button type="submit" disabled={!ingredients.length || save.isPending}>
+                    <Button
+                        type="submit"
+                        disabled={
+                            loadingIngredients ||
+                            !ingredients.length ||
+                            ingredients.some(
+                                (item) => !Number.isFinite(item.quantity) || item.quantity <= 0,
+                            ) ||
+                            save.isPending
+                        }
+                    >
                         {save.isPending ? 'Saving…' : id ? 'Save changes' : 'Create recipe'}
                     </Button>
                 </div>
             </form>
+            {addingIngredient && (
+                <TrackSheet
+                    onClose={() => setAddingIngredient(false)}
+                    onIngredients={addIngredients}
+                />
+            )}
         </>
     )
 }

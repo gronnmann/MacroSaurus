@@ -1,16 +1,20 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '../components/ui'
 import type { Food, Trackable } from '../types'
-import { TrackPage } from './track'
+import { TrackPage, TrackSheet } from './track'
 
 const api = vi.hoisted(() => ({
     trackables: vi.fn(),
     timeOfDaySuggestions: vi.fn(),
     lastTrackedAmount: vi.fn(),
     food: vi.fn(),
+    foodRevision: vi.fn(),
+    recipeRevision: vi.fn(),
+    createFood: vi.fn(),
+    nutrients: vi.fn(),
     resolveFood: vi.fn(),
     addFoodEntry: vi.fn(),
     addRecipeEntry: vi.fn(),
@@ -28,6 +32,7 @@ vi.mock('../lib/api', () => ({
         timeOfDaySuggestions: (type: string) => ['time-of-day-suggestions', type],
         lastTrackedAmount: (type: string, id: string) => ['last-tracked-amount', type, id],
         food: (id: string) => ['food', id],
+        nutrients: ['nutrients'],
         weights: ['weights'],
         expenditure: ['expenditure'],
     },
@@ -61,6 +66,17 @@ describe('mobile tracking amount', () => {
         api.timeOfDaySuggestions.mockResolvedValue({ anchorHour: 11, items: [] })
         api.lastTrackedAmount.mockResolvedValue(undefined)
         api.food.mockResolvedValue(food)
+        api.foodRevision.mockResolvedValue(food)
+        api.createFood.mockResolvedValue(food)
+        api.nutrients.mockResolvedValue([
+            {
+                code: 'vitamin_c_mg',
+                displayName: 'Vitamin C',
+                unit: 'mg',
+                category: 'VITAMIN',
+                sortOrder: 200,
+            },
+        ])
         api.barcode.mockResolvedValue([])
         api.importBarcode.mockResolvedValue(food)
         api.resolveFood.mockImplementation((_revisionId: string, input: { quantity: number }) => {
@@ -76,6 +92,164 @@ describe('mobile tracking amount', () => {
                 ),
             })
         })
+    })
+
+    function setupSheet(ingredients?: (items: unknown[]) => void) {
+        render(
+            <MemoryRouter initialEntries={['/track?date=2026-08-20']}>
+                <QueryClientProvider
+                    client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+                >
+                    <ToastProvider>
+                        {ingredients ? (
+                            <TrackSheet onClose={vi.fn()} onIngredients={ingredients} />
+                        ) : (
+                            <TrackPage />
+                        )}
+                    </ToastProvider>
+                </QueryClientProvider>
+            </MemoryRouter>,
+        )
+        return userEvent.setup()
+    }
+
+    it('logs food at the selected local date and time', async () => {
+        const user = setupSheet()
+        await user.click(await screen.findByRole('button', { name: /Protein milk/ }))
+        expect(screen.getByLabelText('Date')).toHaveValue('2026-08-20')
+        fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-08-19' } })
+        fireEvent.change(screen.getByLabelText('Time'), { target: { value: '18:35' } })
+        await waitFor(() =>
+            expect(screen.getByRole('button', { name: 'Add to Food Log' })).toBeEnabled(),
+        )
+        await user.click(screen.getByRole('button', { name: 'Add to Food Log' }))
+        await waitFor(() =>
+            expect(api.addFoodEntry).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    localDate: '2026-08-19',
+                    consumedAt: new Date('2026-08-19T18:35:00').toISOString(),
+                }),
+            ),
+        )
+    })
+
+    it('retains the chosen date and time when switching to Quick Add', async () => {
+        const user = setupSheet()
+        await user.click(await screen.findByRole('button', { name: /Protein milk/ }))
+        fireEvent.change(screen.getByLabelText('Time'), { target: { value: '07:15' } })
+        await user.click(screen.getByRole('button', { name: /Search results/ }))
+        await user.click(screen.getByRole('tab', { name: 'Quick Add' }))
+        expect(screen.getByLabelText('Time')).toHaveValue('07:15')
+        await user.type(screen.getByLabelText('Name'), 'Breakfast')
+        await user.click(screen.getByRole('button', { name: 'Add to Food Log' }))
+        await waitFor(() =>
+            expect(api.quickTrack).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    localDate: '2026-08-20',
+                    consumedAt: new Date('2026-08-20T07:15:00').toISOString(),
+                }),
+            ),
+        )
+    })
+
+    it('adds an ingredient using its default portion without logging food', async () => {
+        const portionFood: Food = {
+            ...food,
+            portions: [
+                { id: 'glass', name: 'Glass (250 g)', quantity: 1, gramWeight: 250, default: true },
+            ],
+        }
+        api.foodRevision.mockResolvedValue(portionFood)
+        const addIngredients = vi.fn()
+        const user = setupSheet(addIngredients)
+        expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+            'Search',
+            'Scan',
+            'Quick Add',
+            'More',
+        ])
+        await user.click(await screen.findByRole('button', { name: /Protein milk/ }))
+        await waitFor(() => expect(screen.getByLabelText('Amount')).toHaveValue('1'))
+        expect(screen.queryByLabelText('Date')).not.toBeInTheDocument()
+        await user.clear(screen.getByLabelText('Amount'))
+        await user.type(screen.getByLabelText('Amount'), '2')
+        await waitFor(() =>
+            expect(screen.getByRole('button', { name: 'Add ingredient' })).toBeEnabled(),
+        )
+        await user.click(screen.getByRole('button', { name: 'Add ingredient' }))
+        await waitFor(() =>
+            expect(addIngredients).toHaveBeenCalledWith([
+                { food: portionFood, quantity: 2, unit: 'portion', portionId: 'glass' },
+            ]),
+        )
+        expect(api.addFoodEntry).not.toHaveBeenCalled()
+        expect(api.lastTrackedAmount).not.toHaveBeenCalled()
+    })
+
+    it('keeps expanded nutrients when collapsed and includes them in Quick Add', async () => {
+        const user = setupSheet()
+        await user.click(screen.getByRole('tab', { name: 'Quick Add' }))
+        await user.type(screen.getByLabelText('Name'), 'Lunch')
+        expect(screen.getByLabelText('Saturated fat (g)')).not.toBeVisible()
+        await user.click(screen.getByText('More nutrients'))
+        await user.type(screen.getByLabelText('Saturated fat (g)'), '2,5')
+        await user.type(screen.getByLabelText('Fiber (g)'), '3')
+        await user.type(await screen.findByLabelText('Vitamin C (mg)'), '35')
+        await user.type(screen.getByLabelText('Salt (g)'), '1,2')
+        await user.click(screen.getByText('More nutrients'))
+        await user.click(screen.getByLabelText('Save for next time'))
+        await user.click(screen.getByRole('button', { name: 'Add to Food Log' }))
+        await waitFor(() =>
+            expect(api.quickTrack).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    fiberG: 3,
+                    additionalNutrients: { saturated_fat_g: 2.5, vitamin_c_mg: 35, sodium_mg: 480 },
+                    saveAsFood: true,
+                }),
+            ),
+        )
+    })
+
+    it('creates a quick ingredient and chooses its amount without a diary entry', async () => {
+        const addIngredients = vi.fn()
+        const user = setupSheet(addIngredients)
+        await user.click(screen.getByRole('tab', { name: 'Quick Add' }))
+        await user.type(screen.getByLabelText('Name'), 'Homemade sauce')
+        await user.type(screen.getByLabelText('Calories'), '120')
+        await user.click(screen.getByText('More nutrients'))
+        await user.type(screen.getByLabelText('Saturated fat (g)'), '2')
+        await user.click(screen.getByRole('button', { name: 'Choose amount' }))
+        await screen.findByLabelText('Amount')
+        expect(api.createFood).toHaveBeenCalledWith(
+            expect.objectContaining({
+                name: 'Homemade sauce',
+                basisType: 'PER_SERVING',
+                nutrients: expect.objectContaining({ energy_kcal: 120, saturated_fat_g: 2 }),
+            }),
+        )
+        expect(api.quickTrack).not.toHaveBeenCalled()
+        expect(addIngredients).not.toHaveBeenCalled()
+    })
+
+    it('scales the original food amounts when using a recipe as an ingredient', async () => {
+        api.trackables.mockResolvedValue([{ ...trackable, type: 'RECIPE', name: 'Milk shake' }])
+        api.recipeRevision.mockResolvedValue({
+            servings: 4,
+            ingredients: [{ foodRevisionId: food.revisionId, quantity: 800, unit: 'g' }],
+        })
+        const addIngredients = vi.fn()
+        const user = setupSheet(addIngredients)
+        await user.click(await screen.findByRole('button', { name: /Milk shake/ }))
+        await waitFor(() => expect(screen.getByLabelText('Servings')).toHaveValue('1'))
+        await user.clear(screen.getByLabelText('Servings'))
+        await user.type(screen.getByLabelText('Servings'), '2')
+        await user.click(screen.getByRole('button', { name: 'Add ingredient' }))
+        await waitFor(() =>
+            expect(addIngredients).toHaveBeenCalledWith([
+                { food, quantity: 400, unit: 'g', portionId: undefined },
+            ]),
+        )
+        expect(api.addRecipeEntry).not.toHaveBeenCalled()
     })
 
     it('shows nutrition for the entered amount before adding it', async () => {

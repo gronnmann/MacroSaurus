@@ -299,15 +299,14 @@ test('dashboard presents daily nutrition and real habit activity', async ({ page
         })
 })
 
-test('Track logs at the current time and includes weigh-ins', async ({ page }) => {
+test('Track lets you choose date and time and includes weigh-ins', async ({ page }) => {
     await page.goto('/track')
     await expect(
         page.getByRole('dialog').getByRole('link', { name: 'Macrosaurus dashboard' }),
     ).toBeVisible()
     await page.getByRole('tab', { name: 'Quick Add' }).click()
-    await expect(page.getByText('Logged at the current date and time')).toBeVisible()
-    await expect(page.getByLabel('Date', { exact: true })).toHaveCount(0)
-    await expect(page.getByLabel('Time', { exact: true })).toHaveCount(0)
+    await expect(page.getByLabel('Date', { exact: true })).toBeVisible()
+    await expect(page.getByLabel('Time', { exact: true })).toBeVisible()
     await expect(page.getByLabel('Meal', { exact: true })).toHaveCount(0)
 
     await page.getByRole('tab', { name: 'More' }).click()
@@ -532,7 +531,7 @@ test('label photo is available without a barcode lookup', async ({ page }) => {
     await expect(page.getByText('Fill from a label photo')).toBeVisible()
     await page.getByLabel('Enter barcode').fill('3017620422003')
     await page.getByRole('button', { name: 'Look up' }).click()
-    await expect(page.getByRole('link', { name: 'Create food manually' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Create food manually' })).toBeVisible()
     await expect(page.getByText('Fill from a label photo')).toBeVisible()
     await expect(page.getByLabel('Upload label photo')).not.toHaveAttribute('capture')
     await expect(page.getByLabel('Take label photo')).toHaveAttribute('capture', 'environment')
@@ -633,3 +632,169 @@ function dateRange(from: string, to: string) {
     }
     return dates
 }
+
+test('Track preserves a Food Log day and submits the chosen time', async ({ page }, testInfo) => {
+    let tracked: { localDate: string; consumedAt: string } | undefined
+    await page.route('**/api/v1/diary-entries/food', async (route) => {
+        tracked = route.request().postDataJSON()
+        await route.fulfill({ json: entry })
+    })
+    await page.goto(`/food-log?date=${date}`)
+    await page.getByRole('link', { name: 'Track', exact: true }).last().click()
+    await page.getByRole('button', { name: /Banana, raw/ }).click()
+    await expect(page.getByLabel('Date', { exact: true })).toHaveValue(date)
+    await page.getByLabel('Time', { exact: true }).fill('19:25')
+    await page.screenshot({ path: testInfo.outputPath('tracking-date-time.png') })
+    const expected = await page.evaluate((day) => new Date(`${day}T19:25:00`).toISOString(), date)
+    await page.getByRole('button', { name: 'Add to Food Log' }).click()
+    await expect.poll(() => tracked).toMatchObject({ localDate: date, consumedAt: expected })
+})
+
+test('recipe ingredients use Track tabs and preserve portions in the saved recipe', async ({
+    page,
+}) => {
+    let saved: { name: string; ingredients: unknown[] } | undefined
+    let logged = false
+    page.on('request', (request) => {
+        if (/\/(diary-entries\/(food|recipe)|quick-entries)$/.test(new URL(request.url()).pathname))
+            logged = true
+    })
+    await page.route('**/api/v1/recipes', async (route) => {
+        saved = route.request().postDataJSON()
+        await route.fulfill({ json: { id: 'new-recipe' } })
+    })
+    await page.goto('/recipes/new')
+    await page.getByLabel('Recipe name').fill('Banana bowl')
+    await page.getByRole('button', { name: 'Add ingredient', exact: true }).click()
+    const sheet = page.getByRole('dialog')
+    await expect(sheet.getByRole('tab')).toHaveText(['Search', 'Scan', 'Quick Add', 'More'])
+    await sheet.getByRole('button', { name: /Banana, raw/ }).click()
+    await expect(sheet.getByLabel('Amount')).toHaveValue('1')
+    await sheet.getByLabel('Amount').fill('2')
+    await sheet.getByRole('button', { name: 'Add ingredient', exact: true }).click()
+    await expect(sheet).toHaveCount(0)
+    await expect(page.getByLabel('Recipe name')).toHaveValue('Banana bowl')
+    await expect(page.getByLabel('Banana, raw unit')).toHaveValue('portion:portion-1')
+    await page.getByRole('button', { name: 'Create recipe', exact: true }).click()
+    await expect
+        .poll(() => saved)
+        .toMatchObject({
+            name: 'Banana bowl',
+            ingredients: [
+                {
+                    foodRevisionId: 'food-revision-1',
+                    quantity: 2,
+                    unit: 'portion',
+                    portionId: 'portion-1',
+                },
+            ],
+        })
+    expect(logged).toBe(false)
+})
+
+test('Quick Add expands nutrients and keeps them when collapsed', async ({ page }, testInfo) => {
+    let tracked: unknown
+    await page.route('**/api/v1/quick-entries', async (route) => {
+        tracked = route.request().postDataJSON()
+        await route.fulfill({ json: { entry } })
+    })
+    await page.goto('/track')
+    await page.getByRole('tab', { name: 'Quick Add' }).click()
+    await page.getByLabel('Name', { exact: true }).fill('Lunch')
+    await expect(page.getByLabel('Saturated fat (g)')).not.toBeVisible()
+    await page.getByText('More nutrients', { exact: false }).click()
+    await page.getByLabel('Saturated fat (g)').fill('2,5')
+    await page.getByLabel('Fiber (g)').fill('3')
+    await page.getByLabel('Salt (g)').fill('1,2')
+    await page.getByLabel('Iron (mg)').fill('8')
+    const ironBounds = await page.getByLabel('Iron (mg)').boundingBox()
+    const actionBounds = await page.getByRole('button', { name: 'Add to Food Log' }).boundingBox()
+    if (!ironBounds || !actionBounds)
+        throw new Error('Nutrient input and submit button must be rendered')
+    expect(ironBounds.y + ironBounds.height).toBeLessThan(actionBounds.y)
+    await page.screenshot({ path: testInfo.outputPath('quick-nutrients.png'), fullPage: true })
+    await page.getByText('More nutrients', { exact: false }).click()
+    await page.getByLabel('Save for next time').check()
+    await page.getByRole('button', { name: 'Add to Food Log' }).click()
+    await expect
+        .poll(() => tracked)
+        .toMatchObject({
+            fiberG: 3,
+            additionalNutrients: { saturated_fat_g: 2.5, sodium_mg: 480, iron_mg: 8 },
+            saveAsFood: true,
+        })
+})
+
+test('editing a quick entry preserves and clears additional nutrients', async ({ page }) => {
+    let edited: unknown
+    const quick = {
+        ...entry,
+        entryType: 'QUICK',
+        nutrients: {
+            energy_kcal: 100,
+            protein_g: 10,
+            carbohydrate_g: 10,
+            fat_g: 2,
+            fiber_g: 3,
+            saturated_fat_g: 1,
+            sodium_mg: 480,
+            iron_mg: 8,
+        },
+    }
+    await page.route('**/api/v1/diary-days/*', async (route) =>
+        route.fulfill({ json: { date, entries: [quick], totals: quick.nutrients } }),
+    )
+    await page.route('**/api/v1/diary-entries/entry-1', async (route) => {
+        edited = route.request().postDataJSON()
+        await route.fulfill({ json: quick })
+    })
+    await page.goto(`/food-log?date=${date}`)
+    await page.getByRole('button', { name: 'Actions for Banana, raw' }).click()
+    await page.getByRole('button', { name: 'Edit', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Edit Banana, raw' })
+    await dialog.getByText('More nutrients', { exact: false }).click()
+    await expect(dialog.getByLabel('Salt (g)')).toHaveValue('1.2')
+    await expect(dialog.getByLabel('Iron (mg)')).toHaveValue('8')
+    await dialog.getByLabel('Saturated fat (g)').fill('0')
+    await dialog.getByLabel('Iron (mg)').clear()
+    await dialog.getByText('More nutrients', { exact: false }).click()
+    await dialog.getByRole('button', { name: 'Save changes' }).click()
+    await expect
+        .poll(() => edited)
+        .toMatchObject({ fiberG: 3, additionalNutrients: { saturated_fat_g: 0, sodium_mg: 480 } })
+    expect((edited as { additionalNutrients: object }).additionalNutrients).not.toHaveProperty(
+        'iron_mg',
+    )
+})
+
+test('food creation follows EU label order and converts salt', async ({ page }, testInfo) => {
+    let saved: unknown
+    await page.route('**/api/v1/foods', async (route) => {
+        saved = route.request().postDataJSON()
+        await route.fulfill({ json: banana })
+    })
+    await page.goto('/foods/new')
+    await page.getByLabel('Food name').fill('Soup')
+    const fields = page.locator('.nutrient-editor').first().locator('input')
+    await expect
+        .poll(() =>
+            fields.evaluateAll((inputs) => inputs.map((input) => input.getAttribute('name'))),
+        )
+        .toEqual([
+            'nutrients.energy_kcal',
+            'nutrients.fat_g',
+            'nutrients.saturated_fat_g',
+            'nutrients.carbohydrate_g',
+            'nutrients.sugars_g',
+            'nutrients.fiber_g',
+            'nutrients.protein_g',
+            'nutrients.sodium_mg',
+        ])
+    await page.getByLabel('Salt (g)').fill('1,2')
+    await page.getByLabel('Saturated fat (g)').fill('2,5')
+    await page.screenshot({ path: testInfo.outputPath('food-label-order.png'), fullPage: true })
+    await page.getByRole('button', { name: 'Create food', exact: true }).click()
+    await expect
+        .poll(() => saved)
+        .toMatchObject({ nutrients: { saturated_fat_g: 2.5, sodium_mg: 480 } })
+})

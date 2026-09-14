@@ -1,11 +1,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ToastProvider } from '../components/ui'
 import { MealEstimateEntry } from './meal-estimate'
 
-const api = vi.hoisted(() => ({ features: vi.fn(), estimateMeal: vi.fn(), quickTrack: vi.fn() }))
-vi.mock('../lib/api', () => ({ api, queryKeys: { features: ['features'] } }))
+const api = vi.hoisted(() => ({
+    features: vi.fn(),
+    estimateMeal: vi.fn(),
+    quickTrack: vi.fn(),
+    nutrients: vi.fn(),
+}))
+vi.mock('../lib/api', () => ({
+    api,
+    queryKeys: { features: ['features'], nutrients: ['nutrients'] },
+}))
 vi.mock('../lib/image', () => ({
     prepareLabelImage: async (file: File) => `data:image/jpeg;base64,${file.name}`,
 }))
@@ -39,6 +47,7 @@ beforeEach(() => {
     api.features.mockResolvedValue({ aiLabelScan: { granted: true, available: true } })
     api.estimateMeal.mockResolvedValue(result)
     api.quickTrack.mockResolvedValue({})
+    api.nutrients.mockResolvedValue([])
 })
 
 it('submits photos together with text, then logs only the reviewed values', async () => {
@@ -65,16 +74,23 @@ it('submits photos together with text, then logs only the reviewed values', asyn
     expect(screen.getByText('Includes one tablespoon of oil')).toBeVisible()
     await user.clear(screen.getByLabelText('Calories'))
     await user.type(screen.getByLabelText('Calories'), '720')
+    await user.click(screen.getByText('More nutrients'))
+    await user.type(screen.getByLabelText('Saturated fat (g)'), '4,5')
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-08-18' } })
+    fireEvent.change(screen.getByLabelText('Time'), { target: { value: '12:45' } })
     await user.click(screen.getByRole('button', { name: 'Add to Food Log' }))
     await waitFor(() => expect(done).toHaveBeenCalled())
     expect(api.quickTrack).toHaveBeenCalledWith(
         expect.objectContaining({
             name: result.name,
             calories: 720,
+            fiberG: 3,
+            additionalNutrients: { saturated_fat_g: 4.5 },
             proteinG: 45,
             saveAsFood: false,
+            localDate: '2026-08-18',
+            consumedAt: new Date('2026-08-18T12:45:00').toISOString(),
         }),
-        expect.anything(),
     )
 })
 

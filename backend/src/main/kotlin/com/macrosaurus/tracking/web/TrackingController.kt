@@ -95,6 +95,7 @@ data class QuickTrackRequest(
     @field:DecimalMin("0") val fatG: BigDecimal = BigDecimal.ZERO,
     @field:DecimalMin("0") val fiberG: BigDecimal? = null,
     val saveAsFood: Boolean = false,
+    val additionalNutrients: Map<String, BigDecimal> = emptyMap(),
 )
 
 data class AddRecipeEntryRequest(
@@ -116,6 +117,7 @@ data class UpdateDiaryEntryRequest(
     @field:DecimalMin("0") val carbohydrateG: BigDecimal? = null,
     @field:DecimalMin("0") val fatG: BigDecimal? = null,
     @field:DecimalMin("0") val fiberG: BigDecimal? = null,
+    val additionalNutrients: Map<String, BigDecimal>? = null,
 )
 
 data class CopyDiaryEntryRequest(
@@ -216,6 +218,7 @@ internal class TrackingController(
                 request.fatG,
                 request.fiberG,
                 request.saveAsFood,
+                request.additionalNutrients,
             ),
         ).toView()
 
@@ -248,6 +251,7 @@ internal class TrackingController(
                 request.carbohydrateG,
                 request.fatG,
                 request.fiberG,
+                request.additionalNutrients,
             ),
         ).toView()
 

@@ -319,6 +319,9 @@
             0 -10px 20px var(--cream-100),
             0 4px 0 var(--green-950);
     }
+    .quick-track-sheet:has(.micro-editor[open]) .track-primary-action {
+        position: static;
+    }
     .profile-jump {
         top: 72px;
     }

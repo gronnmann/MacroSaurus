@@ -1,12 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
 import { PhotoInput } from '../components/photo-input'
+import { QuickNutrientFields } from '../components/quick-nutrient-fields'
+import {
+    initialTrackingWhen,
+    type TrackingWhen,
+    TrackingWhenFields,
+    trackingTimestamp,
+} from '../components/tracking-when'
 import { Button, Field, Skeleton, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
 import { prepareLabelImage } from '../lib/image'
-import { localDate, parseDecimal } from '../lib/utils'
+import { readQuickNutrients } from '../lib/nutrient-fields'
+import { createQuickFood, type QuickFoodInput } from '../lib/quick-food'
+import type { Food } from '../types'
 
-export function MealEstimateEntry({ onDone }: { onDone: () => void }) {
+export function MealEstimateEntry({
+    onDone,
+    when: externalWhen,
+    onWhenChange,
+    onFoodReady,
+}: {
+    onDone: () => void
+    when?: TrackingWhen
+    onWhenChange?: (when: TrackingWhen) => void
+    onFoodReady?: (food: Food) => void
+}) {
+    const [ownWhen, setOwnWhen] = useState(initialTrackingWhen)
+    const when = externalWhen || ownWhen
     const client = useQueryClient()
     const toast = useToast()
     const features = useQuery({ queryKey: queryKeys.features, queryFn: api.features })
@@ -16,8 +37,13 @@ export function MealEstimateEntry({ onDone }: { onDone: () => void }) {
     const [photoError, setPhotoError] = useState('')
     const estimate = useMutation({ mutationFn: api.estimateMeal })
     const add = useMutation({
-        mutationFn: api.quickTrack,
-        onSuccess: () => {
+        mutationFn: (input: QuickFoodInput) =>
+            onFoodReady ? createQuickFood(input) : api.quickTrack(input),
+        onSuccess: (result) => {
+            if (onFoodReady) {
+                onFoodReady(result as Food)
+                return
+            }
             client.invalidateQueries({ queryKey: ['diary'] })
             toast.push('Added to Food Log')
             onDone()
@@ -43,17 +69,10 @@ export function MealEstimateEntry({ onDone }: { onDone: () => void }) {
     const save = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         const data = new FormData(event.currentTarget)
-        const value = (key: string) => parseDecimal(data.get(key))
-        const trackedAt = new Date()
         add.mutate({
             name: String(data.get('name')).trim(),
-            calories: value('calories'),
-            proteinG: value('proteinG'),
-            carbohydrateG: value('carbohydrateG'),
-            fatG: value('fatG'),
-            fiberG: data.get('fiberG') ? value('fiberG') : null,
-            localDate: localDate(trackedAt),
-            consumedAt: trackedAt.toISOString(),
+            ...readQuickNutrients(data),
+            ...(onFoodReady ? {} : trackingTimestamp(when)),
             saveAsFood: data.get('save') === 'on',
         })
     }
@@ -93,33 +112,33 @@ export function MealEstimateEntry({ onDone }: { onDone: () => void }) {
                     <Field label="Meal name" className="span-2">
                         <input name="name" required maxLength={200} defaultValue={result.name} />
                     </Field>
-                    {(
-                        [
-                            ['calories', 'Calories'],
-                            ['proteinG', 'Protein (g)'],
-                            ['carbohydrateG', 'Carbs (g)'],
-                            ['fatG', 'Fat (g)'],
-                            ['fiberG', 'Fiber (g)'],
-                        ] as const
-                    ).map(([key, label]) => (
-                        <Field key={key} label={label}>
-                            <input
-                                name={key}
-                                type="number"
-                                inputMode="decimal"
-                                min="0"
-                                step="any"
-                                required={key !== 'fiberG'}
-                                defaultValue={result[key] ?? ''}
+                    <QuickNutrientFields
+                        nutrients={{
+                            energy_kcal: result.calories,
+                            protein_g: result.proteinG,
+                            carbohydrate_g: result.carbohydrateG,
+                            fat_g: result.fatG,
+                            ...(result.fiberG == null ? {} : { fiber_g: result.fiberG }),
+                        }}
+                    />
+                    {!onFoodReady && (
+                        <>
+                            <TrackingWhenFields
+                                value={when}
+                                onChange={onWhenChange || setOwnWhen}
                             />
-                        </Field>
-                    ))}
-                    <label className="check span-2">
-                        <input name="save" type="checkbox" />
-                        Save for next time
-                    </label>
+                            <label className="check span-2">
+                                <input name="save" type="checkbox" />
+                                Save for next time
+                            </label>
+                        </>
+                    )}
                     <Button type="submit" className="span-2" disabled={add.isPending}>
-                        {add.isPending ? 'Adding…' : 'Add to Food Log'}
+                        {add.isPending
+                            ? 'Adding…'
+                            : onFoodReady
+                              ? 'Choose amount'
+                              : 'Add to Food Log'}
                     </Button>
                     <Button
                         variant="secondary"

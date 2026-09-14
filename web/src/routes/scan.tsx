@@ -33,7 +33,20 @@ export function ScanPage() {
     )
 }
 
-export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => void } = {}) {
+export function ScanExperience({
+    onFoodReady,
+    embedded = false,
+}: {
+    onFoodReady?: (food: Food) => void
+    embedded?: boolean
+} = {}) {
+    const [reviewId, setReviewId] = useState('')
+    const [manual, setManual] = useState(false)
+    const definitions = useQuery({
+        queryKey: queryKeys.nutrients,
+        queryFn: api.nutrients,
+        enabled: manual,
+    })
     const [code, setCode] = useState('')
     const [camera, setCamera] = useState(false)
     const [cameraError, setCameraError] = useState('')
@@ -74,8 +87,14 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
                 barcode: code || null,
                 localeHint: navigator.language,
             }),
-        onSuccess: (job) => navigate(`/scan/${job.id}`),
+        onSuccess: (job) => (embedded ? setReviewId(job.id) : navigate(`/scan/${job.id}`)),
         onError: (error) => toast.push('Could not read label', error.message, 'error'),
+    })
+
+    const create = useMutation({
+        mutationFn: api.createFood,
+        onSuccess: (food) => onFoodReady?.(food),
+        onError: (error) => toast.push('Could not create food', error.message, 'error'),
     })
 
     const lookUp = useCallback(
@@ -126,6 +145,35 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
         }
     }, [camera, lookUp])
 
+    if (reviewId)
+        return <ScanReview id={reviewId} onFoodReady={onFoodReady} onBack={() => setReviewId('')} />
+    if (manual)
+        return (
+            <>
+                <button type="button" className="sheet-back" onClick={() => setManual(false)}>
+                    ← Scan barcode
+                </button>
+                <FoodForm
+                    food={{
+                        id: '',
+                        revisionId: '',
+                        revision: 0,
+                        name: '',
+                        barcode: code,
+                        source: 'USER',
+                        basisType: 'PER_100_G',
+                        basisAmount: 100,
+                        basisUnit: 'g',
+                        nutrients: {},
+                        portions: [],
+                        createdAt: '',
+                    }}
+                    definitions={definitions.data}
+                    pending={create.isPending}
+                    onSubmit={(input) => create.mutate(input)}
+                />
+            </>
+        )
     return (
         <div className="scan-experience">
             <Card tone="dark" className="barcode-card">
@@ -198,12 +246,16 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
                         The barcode was not found. Start a food with the barcode already filled in,
                         then add the values from the package.
                     </p>
-                    <Link
-                        className="button button--primary"
-                        to={`/foods/new?barcode=${encodeURIComponent(code)}`}
-                    >
-                        Create food manually
-                    </Link>
+                    {embedded ? (
+                        <Button onClick={() => setManual(true)}>Create food manually</Button>
+                    ) : (
+                        <Link
+                            className="button button--primary"
+                            to={`/foods/new?barcode=${encodeURIComponent(code)}`}
+                        >
+                            Create food manually
+                        </Link>
+                    )}
                 </Card>
             )}
             {aiEnabled && (
@@ -239,6 +291,18 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
 
 export function ScanReviewPage() {
     const { id = '' } = useParams()
+    return <ScanReview id={id} />
+}
+
+function ScanReview({
+    id,
+    onFoodReady,
+    onBack,
+}: {
+    id: string
+    onFoodReady?: (food: Food) => void
+    onBack?: () => void
+}) {
     const navigate = useNavigate()
     const toast = useToast()
     const nutrients = useQuery({
@@ -257,7 +321,8 @@ export function ScanReviewPage() {
         mutationFn: (input: FoodInput) => api.confirmScan(id, input),
         onSuccess: (food) => {
             toast.push('Food created')
-            navigate(`/track?food=${food.id}`)
+            if (onFoodReady) onFoodReady(food)
+            else navigate(`/track?food=${food.id}`)
         },
         onError: (error) => toast.push('Could not save food', error.message, 'error'),
     })
@@ -271,16 +336,25 @@ export function ScanReviewPage() {
             </div>
         )
     if (job.error || job.data?.errorMessage)
-        return <ErrorPanel error={job.error || new Error(job.data?.errorMessage)} />
+        return (
+            <>
+                <ErrorPanel error={job.error || new Error(job.data?.errorMessage)} />
+                {onBack && <Button onClick={onBack}>Back to scan</Button>}
+            </>
+        )
     if (!job.data?.draft)
         return (
             <StatePanel
                 title="No label found"
                 message="Try taking a clearer photo of the nutrition table."
                 action={
-                    <Link className="button button--primary" to="/track">
-                        Try again
-                    </Link>
+                    onBack ? (
+                        <Button onClick={onBack}>Try again</Button>
+                    ) : (
+                        <Link className="button button--primary" to="/track">
+                            Try again
+                        </Link>
+                    )
                 }
             />
         )
@@ -319,6 +393,11 @@ export function ScanReviewPage() {
                 title="Does everything look right?"
                 description="Correct anything that differs from the package."
             />
+            {onBack && (
+                <Button variant="secondary" onClick={onBack}>
+                    Back to scan
+                </Button>
+            )}
             <div className="scan-warnings">
                 {draft.warnings.map((warning) => (
                     <Badge tone="orange" key={warning}>

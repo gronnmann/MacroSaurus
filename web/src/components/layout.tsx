@@ -108,7 +108,11 @@ function AuthenticatedLayout() {
                             <NavLink
                                 className={item.track ? 'nav-track' : ''}
                                 to={item.to}
-                                state={item.track ? { from: location.pathname } : undefined}
+                                state={
+                                    item.track
+                                        ? { from: location.pathname + location.search }
+                                        : undefined
+                                }
                                 key={item.to}
                             >
                                 <item.icon />
@@ -147,7 +151,7 @@ function AuthenticatedLayout() {
                                 <Link
                                     className="bottom-track"
                                     to={item.to}
-                                    state={{ from: location.pathname }}
+                                    state={{ from: location.pathname + location.search }}
                                     key={item.to}
                                 >
                                     <span>

@@ -12,6 +12,7 @@ import {
 import { type FormEvent, useState } from 'react'
 import { Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import { Link, useSearchParams } from 'react-router-dom'
+import { QuickNutrientFields } from '../components/quick-nutrient-fields'
 import {
     AppDialog,
     Button,
@@ -26,6 +27,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
+import { readQuickNutrients } from '../lib/nutrient-fields'
 import { formatNumber, kcal, parseDecimal, round, today } from '../lib/utils'
 import type { DiaryEntry, Food, Recipe, UpdateDiaryEntryInput } from '../types'
 
@@ -113,7 +115,7 @@ export function FoodLogPage() {
                 </div>
                 <Link
                     className="button button--primary"
-                    to="/track"
+                    to={`/track?date=${date}`}
                     state={{ from: `/food-log?date=${date}` }}
                 >
                     <Plus />
@@ -240,7 +242,7 @@ export function FoodLogPage() {
                     title="Nothing tracked yet"
                     message="Your entries will appear here in time order."
                     action={
-                        <Link className="button button--primary" to="/track">
+                        <Link className="button button--primary" to={`/track?date=${date}`}>
                             <Plus />
                             Track something
                         </Link>
@@ -320,11 +322,7 @@ function EntryEditor({
         if (entry.entryType === 'QUICK')
             Object.assign(base, {
                 name: data.get('name'),
-                calories: number(data.get('calories')),
-                proteinG: number(data.get('protein')),
-                carbohydrateG: number(data.get('carbs')),
-                fatG: number(data.get('fat')),
-                fiberG: numberOrNull(data.get('fiber')),
+                ...readQuickNutrients(data),
             })
         save.mutate(base)
     }
@@ -415,46 +413,7 @@ function QuickFields({ entry }: { entry: DiaryEntry }) {
             <Field className="span-2" label="Name">
                 <input name="name" required defaultValue={entry.displayName} />
             </Field>
-            <Field label="Calories">
-                <input
-                    name="calories"
-                    type="text"
-                    inputMode="decimal"
-                    defaultValue={entry.nutrients.energy_kcal}
-                />
-            </Field>
-            <Field label="Protein (g)">
-                <input
-                    name="protein"
-                    type="text"
-                    inputMode="decimal"
-                    defaultValue={entry.nutrients.protein_g || 0}
-                />
-            </Field>
-            <Field label="Carbs (g)">
-                <input
-                    name="carbs"
-                    type="text"
-                    inputMode="decimal"
-                    defaultValue={entry.nutrients.carbohydrate_g || 0}
-                />
-            </Field>
-            <Field label="Fat (g)">
-                <input
-                    name="fat"
-                    type="text"
-                    inputMode="decimal"
-                    defaultValue={entry.nutrients.fat_g || 0}
-                />
-            </Field>
-            <Field className="span-2" label="Fiber (g)">
-                <input
-                    name="fiber"
-                    type="text"
-                    inputMode="decimal"
-                    defaultValue={entry.nutrients.fiber_g}
-                />
-            </Field>
+            <QuickNutrientFields nutrients={entry.nutrients} />
         </>
     )
 }
@@ -522,6 +481,3 @@ const formatTime = (value: string) =>
         hour: '2-digit',
         minute: '2-digit',
     }).format(new Date(value))
-const number = (value: FormDataEntryValue | null) => parseDecimal(value || 0)
-const numberOrNull = (value: FormDataEntryValue | null) =>
-    value === '' || value == null ? null : parseDecimal(value)

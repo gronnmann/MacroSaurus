@@ -1,6 +1,7 @@
 package com.macrosaurus.acquisition.application
 
 import com.macrosaurus.catalog.BasisType
+import com.macrosaurus.catalog.PortionDraft
 import com.macrosaurus.catalog.SourceKind
 import java.math.BigDecimal
 import java.time.OffsetDateTime
@@ -14,6 +15,7 @@ internal data class BarcodeCandidate(
     val basisType: BasisType,
     val nutrients: Map<String, BigDecimal>,
     val externalId: String,
+    val portions: List<PortionDraft> = emptyList(),
 )
 
 internal data class StartLabelScanCommand(

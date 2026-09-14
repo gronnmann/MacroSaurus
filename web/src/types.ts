@@ -362,11 +362,12 @@ export interface UpdateDiaryEntryInput {
     unit?: string
     portionId?: string | null
     name?: string
-    calories?: number
+    calories?: number | null
     proteinG?: number
     carbohydrateG?: number
     fatG?: number
     fiberG?: number | null
+    additionalNutrients?: Nutrients
 }
 
 export interface BarcodeCandidate {

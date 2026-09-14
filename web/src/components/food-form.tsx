@@ -2,6 +2,12 @@ import { Camera, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
+import {
+    editableNutrients,
+    labelMacroCodes,
+    nutrientFields,
+    storedNutrients,
+} from '../lib/nutrient-fields'
 import { parseDecimal } from '../lib/utils'
 import type { Food, FoodInput, NutrientDefinition } from '../types'
 import { PhotoInput } from './photo-input'
@@ -54,7 +60,7 @@ export function FoodForm({
         barcode: food?.barcode || '',
         basisType: food?.basisType || 'PER_100_G',
         densityGPerMl: food?.densityGPerMl,
-        nutrients: food?.nutrients || {},
+        nutrients: editableNutrients(food?.nutrients || {}),
         portions:
             food?.portions.map((portion) => ({
                 name: portion.name,
@@ -78,7 +84,7 @@ export function FoodForm({
     const basis = watch('basisType')
     const submit = (values: FoodFormValues) => {
         const nutrients = Object.fromEntries(
-            Object.entries(values.nutrients).filter(([, value]) => Number.isFinite(value)),
+            Object.entries(values.nutrients).filter(([, value]) => value !== undefined),
         )
         const result = schema.safeParse({ ...values, nutrients })
         if (!result.success) {
@@ -102,7 +108,7 @@ export function FoodForm({
             basisAmount,
             basisUnit,
             densityGPerMl: result.data.densityGPerMl || null,
-            nutrients: result.data.nutrients,
+            nutrients: storedNutrients(result.data.nutrients),
             portions: result.data.portions.map((portion, index) => ({
                 name: portion.name,
                 quantity: 1,
@@ -112,22 +118,9 @@ export function FoodForm({
             })),
         })
     }
-    const macroDefs = definitions.filter(
-        (item) =>
-            item.category === 'MACRO' ||
-            item.category === 'MACRONUTRIENT' ||
-            item.code === 'energy_kcal',
-    )
-    const microDefs = definitions.filter((item) => !macroDefs.includes(item))
-    const shownMacro = macroDefs.length
-        ? macroDefs
-        : [
-              { code: 'energy_kcal', displayName: 'Energy', unit: 'kcal' },
-              { code: 'protein_g', displayName: 'Protein', unit: 'g' },
-              { code: 'carbohydrate_g', displayName: 'Carbohydrate', unit: 'g' },
-              { code: 'fat_g', displayName: 'Fat', unit: 'g' },
-              { code: 'fiber_g', displayName: 'Fiber', unit: 'g' },
-          ]
+    const fields = nutrientFields(definitions)
+    const shownMacro = fields.filter((item) => labelMacroCodes.has(item.code))
+    const microDefs = fields.filter((item) => !labelMacroCodes.has(item.code))
     return (
         <form className="editor-form" onSubmit={handleSubmit(submit)}>
             {aiLabelEnabled && onLabelPhoto && (
@@ -198,7 +191,11 @@ export function FoodForm({
                 />
                 <div className="nutrient-editor">
                     {shownMacro.map((item) => (
-                        <Field label={`${item.displayName} (${item.unit})`} key={item.code}>
+                        <Field
+                            label={`${item.displayName} (${item.unit})`}
+                            key={item.code}
+                            error={errors.nutrients?.[item.code]?.message}
+                        >
                             <input
                                 type="text"
                                 inputMode="decimal"
@@ -211,11 +208,15 @@ export function FoodForm({
                 </div>
                 <details className="micro-editor">
                     <summary>
-                        All micronutrients <span>{microDefs.length} available</span>
+                        More nutrients <span>{microDefs.length} available</span>
                     </summary>
                     <div className="nutrient-editor">
                         {microDefs.map((item) => (
-                            <Field label={`${item.displayName} (${item.unit})`} key={item.code}>
+                            <Field
+                                label={`${item.displayName} (${item.unit})`}
+                                key={item.code}
+                                error={errors.nutrients?.[item.code]?.message}
+                            >
                                 <input
                                     type="text"
                                     inputMode="decimal"

@@ -7,6 +7,7 @@ import com.macrosaurus.catalog.FoodCreator
 import com.macrosaurus.catalog.FoodDraft
 import com.macrosaurus.catalog.FoodResolver
 import com.macrosaurus.catalog.FoodSnapshot
+import com.macrosaurus.catalog.NutrientCatalog
 import com.macrosaurus.identity.ProfileReader
 import com.macrosaurus.recipes.RecipeReader
 import com.macrosaurus.recipes.RecipeSnapshot
@@ -84,6 +85,7 @@ internal data class QuickTrackCommand(
     val fatG: BigDecimal = BigDecimal.ZERO,
     val fiberG: BigDecimal? = null,
     val saveAsFood: Boolean = false,
+    val additionalNutrients: Map<String, BigDecimal> = emptyMap(),
 )
 
 internal data class AddRecipeEntryCommand(
@@ -105,6 +107,7 @@ internal data class UpdateDiaryEntryCommand(
     val carbohydrateG: BigDecimal? = null,
     val fatG: BigDecimal? = null,
     val fiberG: BigDecimal? = null,
+    val additionalNutrients: Map<String, BigDecimal>? = null,
 )
 
 internal data class CopyDiaryEntryCommand(
@@ -129,6 +132,7 @@ internal class TrackingService(
     private val recipes: RecipeReader,
     private val profiles: ProfileReader,
     private val clock: Clock,
+    private val nutrientCatalog: NutrientCatalog,
 ) : NutritionHistory,
     NutritionDayReviewer {
     fun day(
@@ -170,11 +174,14 @@ internal class TrackingService(
         request: QuickTrackCommand,
     ): QuickTrackResult {
         val macroValues =
-            linkedMapOf(
-                "protein_g" to request.proteinG,
-                "carbohydrate_g" to request.carbohydrateG,
-                "fat_g" to request.fatG,
-            ).apply { request.fiberG?.let { put("fiber_g", it) } }
+            quickNutrients(
+                request.proteinG,
+                request.carbohydrateG,
+                request.fatG,
+                request.fiberG,
+                request.additionalNutrients,
+                nutrientCatalog.nutrients().map { it.code }.toSet(),
+            )
         val calculated = NutrientMath.calculatedCalories(macroValues)
         val usedCalories = request.calories ?: calculated
         val nutrients = NutrientValues(macroValues + ("energy_kcal" to usedCalories))
@@ -271,12 +278,16 @@ internal class TrackingService(
                     val protein = request.proteinG ?: throw InvalidOperationException("Quick entry protein is required")
                     val carbohydrate = request.carbohydrateG ?: throw InvalidOperationException("Quick entry carbohydrate is required")
                     val fat = request.fatG ?: throw InvalidOperationException("Quick entry fat is required")
+                    val extras = request.additionalNutrients ?: current.nutrients.filterKeys { it !in quickCoreNutrients }
                     val macros =
-                        linkedMapOf(
-                            "protein_g" to protein,
-                            "carbohydrate_g" to carbohydrate,
-                            "fat_g" to fat,
-                        ).apply { request.fiberG?.let { put("fiber_g", it) } }
+                        quickNutrients(
+                            protein,
+                            carbohydrate,
+                            fat,
+                            request.fiberG,
+                            extras,
+                            nutrientCatalog.nutrients().map { it.code }.toSet(),
+                        )
                     val calories = request.calories ?: NutrientMath.calculatedCalories(macros)
                     UpdatedEntry(name, BigDecimal.ONE, "serving", null, NutrientValues(macros + ("energy_kcal" to calories)))
                 }

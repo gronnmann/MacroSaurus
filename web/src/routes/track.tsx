@@ -15,36 +15,78 @@ import {
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { FoodForm } from '../components/food-form'
 import { Brand } from '../components/layout'
+import { QuickNutrientFields } from '../components/quick-nutrient-fields'
+import {
+    initialTrackingWhen,
+    type TrackingWhen,
+    TrackingWhenFields,
+    trackingTimestamp,
+} from '../components/tracking-when'
 import { Button, Field, Skeleton, StatePanel, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
-import { formatNumber, kcal, localDate, parseDecimal } from '../lib/utils'
-import type { Food, Nutrients, Trackable } from '../types'
+import { readQuickNutrients } from '../lib/nutrient-fields'
+import { createQuickFood, type QuickFoodInput } from '../lib/quick-food'
+import { formatNumber, kcal, parseDecimal } from '../lib/utils'
+import type { Food, FoodInput, Nutrients, Trackable } from '../types'
 import { MealEstimateEntry } from './meal-estimate'
 import { ScanExperience } from './scan'
 
-type TrackMode = 'search' | 'scan' | 'quick' | 'more' | 'weight' | 'estimate'
-type TopTrackMode = Exclude<TrackMode, 'weight' | 'estimate'>
+type TrackMode = 'search' | 'scan' | 'quick' | 'more' | 'weight' | 'estimate' | 'create'
+type TopTrackMode = Exclude<TrackMode, 'weight' | 'estimate' | 'create'>
 
 export function TrackPage() {
     const location = useLocation()
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
     const requestedFoodId = searchParams.get('food') || ''
-    const [mode, setMode] = useState<TrackMode>('search')
-    const [selected, setSelected] = useState<{ item: Trackable; origin: 'search' | 'scan' }>()
     const from = (location.state as { from?: string } | null)?.from || '/dashboard'
+    const requestedDate =
+        searchParams.get('date') ||
+        new URL(from, 'https://local').searchParams.get('date') ||
+        undefined
+    return (
+        <TrackSheet
+            initialFoodId={requestedFoodId}
+            initialDate={requestedDate}
+            onClose={() => navigate(from, { replace: true })}
+        />
+    )
+}
+
+export type IngredientSelection = { food: Food; quantity: number; unit: string; portionId?: string }
+
+export function TrackSheet({
+    initialFoodId = '',
+    initialDate,
+    onClose: close,
+    onIngredients,
+}: {
+    initialFoodId?: string
+    initialDate?: string
+    onClose: () => void
+    onIngredients?: (ingredients: IngredientSelection[]) => void
+}) {
+    const client = useQueryClient()
+    const [mode, setMode] = useState<TrackMode>('search')
+    const [when, setWhen] = useState(() => initialTrackingWhen(initialDate))
+    const [selected, setSelected] = useState<{ item: Trackable; origin: 'search' | 'scan' }>()
     const requestedFood = useQuery({
-        queryKey: queryKeys.food(requestedFoodId),
-        queryFn: () => api.food(requestedFoodId),
-        enabled: Boolean(requestedFoodId),
+        queryKey: queryKeys.food(initialFoodId),
+        queryFn: () => api.food(initialFoodId),
+        enabled: Boolean(initialFoodId),
     })
     useEffect(() => {
-        if (requestedFood.data && !selected) {
+        if (requestedFood.data)
             setSelected({ item: trackableFood(requestedFood.data), origin: 'search' })
-        }
-    }, [requestedFood.data, selected])
-    const close = () => navigate(from, { replace: true })
+    }, [requestedFood.data])
+    const selectFood = (food: Food) => {
+        client.setQueryData(['food-revision', food.revisionId], food)
+        client.invalidateQueries({ queryKey: ['trackables'] })
+        client.invalidateQueries({ queryKey: ['foods'] })
+        setSelected({ item: trackableFood(food), origin: 'scan' })
+    }
     useEffect(() => {
         const previousOverflow = document.body.style.overflow
         document.body.style.overflow = 'hidden'
@@ -80,37 +122,51 @@ export function TrackPage() {
                     </div>
                     <div className="track-sheet-title">
                         <p className="eyebrow">QUICK ACTION</p>
-                        <h1 id="track-title">{selected ? 'Choose amount' : trackTitle(mode)}</h1>
+                        <h1 id="track-title">
+                            {selected
+                                ? 'Choose amount'
+                                : onIngredients && mode === 'search'
+                                  ? 'Add ingredient'
+                                  : trackTitle(mode)}
+                        </h1>
                     </div>
                 </header>
                 {selected ? (
                     <AmountForm
+                        key={selected.item.revisionId}
                         item={selected.item}
+                        when={when}
+                        onWhenChange={setWhen}
+                        onIngredients={onIngredients}
                         backLabel={selected.origin === 'scan' ? 'Scan barcode' : 'Search results'}
                         onBack={() => setSelected(undefined)}
                         onDone={close}
                     />
                 ) : (
                     <>
-                        {mode !== 'weight' && mode !== 'estimate' && (
+                        {mode !== 'weight' && mode !== 'estimate' && mode !== 'create' && (
                             <TrackTabs mode={mode} onMode={(next) => setMode(next)} />
                         )}
                         {mode === 'search' && (
                             <TrackSearch
+                                onCreate={() => setMode('create')}
                                 onSelect={(item) => setSelected({ item, origin: 'search' })}
                             />
                         )}
-                        {mode === 'quick' && <QuickEntry onDone={close} />}
-                        {mode === 'scan' && (
-                            <ScanExperience
-                                onFoodReady={(food) =>
-                                    setSelected({ item: trackableFood(food), origin: 'scan' })
-                                }
+                        {mode === 'quick' && (
+                            <QuickEntry
+                                onDone={close}
+                                when={when}
+                                onWhenChange={setWhen}
+                                onFoodReady={onIngredients ? selectFood : undefined}
                             />
                         )}
+                        {mode === 'scan' && <ScanExperience embedded onFoodReady={selectFood} />}
                         {mode === 'more' && (
                             <TrackMore
-                                onWeight={() => setMode('weight')}
+                                onWeight={onIngredients ? undefined : () => setMode('weight')}
+                                allowRecipeCreation={!onIngredients}
+                                onCreate={() => setMode('create')}
                                 onEstimate={() => setMode('estimate')}
                             />
                         )}
@@ -123,8 +179,19 @@ export function TrackPage() {
                                 >
                                     ← More tracking options
                                 </button>
-                                <MealEstimateEntry onDone={close} />
+                                <MealEstimateEntry
+                                    onDone={close}
+                                    when={when}
+                                    onWhenChange={setWhen}
+                                    onFoodReady={onIngredients ? selectFood : undefined}
+                                />
                             </>
+                        )}
+                        {mode === 'create' && (
+                            <CreateFoodEntry
+                                onFoodReady={selectFood}
+                                onBack={() => setMode('more')}
+                            />
                         )}
                         {mode === 'weight' && (
                             <>
@@ -175,7 +242,17 @@ function TrackTabs({ mode, onMode }: { mode: TopTrackMode; onMode: (mode: TopTra
     )
 }
 
-function TrackMore({ onWeight, onEstimate }: { onWeight: () => void; onEstimate: () => void }) {
+function TrackMore({
+    allowRecipeCreation,
+    onWeight,
+    onEstimate,
+    onCreate,
+}: {
+    allowRecipeCreation?: boolean
+    onWeight?: () => void
+    onEstimate: () => void
+    onCreate?: () => void
+}) {
     return (
         <div className="track-home">
             <div className="track-home-grid">
@@ -184,27 +261,45 @@ function TrackMore({ onWeight, onEstimate }: { onWeight: () => void; onEstimate:
                     <b>AI meal estimate</b>
                     <small>Photos and description</small>
                 </button>
-                <button type="button" onClick={onWeight}>
-                    <Scale />
-                    <b>Log weight</b>
-                    <small>Add a weigh-in now</small>
-                </button>
-                <Link to="/foods/new">
-                    <Beef />
-                    <b>Create food</b>
-                    <small>Add your own</small>
-                </Link>
-                <Link to="/recipes/new">
-                    <BookOpen />
-                    <b>Create recipe</b>
-                    <small>Build a batch</small>
-                </Link>
+                {onWeight && (
+                    <button type="button" onClick={onWeight}>
+                        <Scale />
+                        <b>Log weight</b>
+                        <small>Add a weigh-in now</small>
+                    </button>
+                )}
+                {onCreate ? (
+                    <button type="button" onClick={onCreate}>
+                        <Beef />
+                        <b>Create food</b>
+                        <small>Add your own</small>
+                    </button>
+                ) : (
+                    <Link to="/foods/new">
+                        <Beef />
+                        <b>Create food</b>
+                        <small>Add your own</small>
+                    </Link>
+                )}
+                {allowRecipeCreation && (
+                    <Link to="/recipes/new">
+                        <BookOpen />
+                        <b>Create recipe</b>
+                        <small>Build a batch</small>
+                    </Link>
+                )}
             </div>
         </div>
     )
 }
 
-function TrackSearch({ onSelect }: { onSelect: (item: Trackable) => void }) {
+function TrackSearch({
+    onSelect,
+    onCreate,
+}: {
+    onSelect: (item: Trackable) => void
+    onCreate?: () => void
+}) {
     const [query, setQuery] = useState('')
     const [type, setType] = useState('ALL')
     const results = useQuery({
@@ -298,12 +393,18 @@ function TrackSearch({ onSelect }: { onSelect: (item: Trackable) => void }) {
                     message="Try another name or create your own food or recipe."
                     action={
                         <div className="inline-actions">
-                            <Link className="button button--secondary" to="/foods/new">
-                                Create food
-                            </Link>
-                            <Link className="button button--secondary" to="/recipes/new">
-                                Create recipe
-                            </Link>
+                            {onCreate ? (
+                                <Button onClick={onCreate}>Create food</Button>
+                            ) : (
+                                <>
+                                    <Link className="button button--secondary" to="/foods/new">
+                                        Create food
+                                    </Link>
+                                    <Link className="button button--secondary" to="/recipes/new">
+                                        Create recipe
+                                    </Link>
+                                </>
+                            )}
                         </div>
                     }
                 />
@@ -339,7 +440,13 @@ function AmountForm({
     backLabel,
     onBack,
     onDone,
+    when,
+    onWhenChange,
+    onIngredients,
 }: {
+    when: TrackingWhen
+    onWhenChange: (when: TrackingWhen) => void
+    onIngredients?: (ingredients: IngredientSelection[]) => void
     item: Trackable
     backLabel: string
     onBack: () => void
@@ -352,20 +459,25 @@ function AmountForm({
     const [quantity, setQuantity] = useState('')
     const [unitChoice, setUnitChoice] = useState(item.type === 'FOOD' ? 'g' : 'serving')
     const food = useQuery({
-        queryKey: queryKeys.food(item.id),
-        queryFn: () => api.food(item.id),
+        queryKey: ['food-revision', item.revisionId],
+        queryFn: () => api.foodRevision(item.revisionId),
         enabled: item.type === 'FOOD',
     })
     const lastAmount = useQuery({
         queryKey: queryKeys.lastTrackedAmount(item.type, item.revisionId),
         queryFn: () => api.lastTrackedAmount(item.type, item.revisionId),
         staleTime: 30_000,
+        enabled: !onIngredients,
     })
     useEffect(() => {
-        if (initialized.current || lastAmount.isPending || (item.type === 'FOOD' && !food.data))
+        if (
+            initialized.current ||
+            (!onIngredients && lastAmount.isPending) ||
+            (item.type === 'FOOD' && !food.data)
+        )
             return
         initialized.current = true
-        if (lastAmount.data) {
+        if (!onIngredients && lastAmount.data) {
             setQuantity(String(lastAmount.data.quantity))
             setUnitChoice(
                 lastAmount.data.portionId
@@ -383,7 +495,7 @@ function AmountForm({
             setUnitChoice('serving')
         }
         setAmountReady(true)
-    }, [food.data, item.type, lastAmount.data, lastAmount.isPending])
+    }, [food.data, item.type, lastAmount.data, lastAmount.isPending, onIngredients])
     const numericQuantity = parseDecimal(quantity)
     const portionId = unitChoice.startsWith('portion:') ? unitChoice.slice(8) : ''
     const unit = portionId ? 'portion' : unitChoice
@@ -408,22 +520,44 @@ function AmountForm({
           ? scaleNutrients(item.nutrients, numericQuantity)
           : resolved.data?.nutrients
     const add = useMutation({
-        mutationFn: (payload: unknown) =>
-            item.type === 'FOOD' ? api.addFoodEntry(payload) : api.addRecipeEntry(payload),
+        mutationFn: async (payload: unknown) => {
+            if (onIngredients) {
+                if (food.data)
+                    onIngredients([
+                        {
+                            food: food.data,
+                            quantity: numericQuantity,
+                            unit,
+                            portionId: portionId || undefined,
+                        },
+                    ])
+                else {
+                    const recipe = await api.recipeRevision(item.revisionId)
+                    const ingredients = await Promise.all(
+                        recipe.ingredients.map(async (ingredient) => ({
+                            food: await api.foodRevision(ingredient.foodRevisionId),
+                            quantity: (ingredient.quantity * numericQuantity) / recipe.servings,
+                            unit: ingredient.unit,
+                            portionId: ingredient.portionId,
+                        })),
+                    )
+                    onIngredients(ingredients)
+                }
+                return
+            }
+            return item.type === 'FOOD' ? api.addFoodEntry(payload) : api.addRecipeEntry(payload)
+        },
         onSuccess: () => {
             client.invalidateQueries({ queryKey: ['diary'] })
-            toast.push('Added to Food Log', item.name)
+            toast.push(onIngredients ? 'Ingredient added' : 'Added to Food Log', item.name)
             onDone()
         },
         onError: (error) => toast.push('Could not track item', error.message, 'error'),
     })
     const submit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
-        const trackedAt = new Date()
-        const common = {
-            localDate: localDate(trackedAt),
-            consumedAt: trackedAt.toISOString(),
-        }
+        if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) return
+        const common = onIngredients ? {} : trackingTimestamp(when)
         if (item.type === 'FOOD')
             add.mutate({
                 ...common,
@@ -454,7 +588,16 @@ function AmountForm({
                     <p>{item.brand || (item.type === 'RECIPE' ? 'Recipe' : 'Food')}</p>
                 </div>
             </div>
+            {food.isError && (
+                <p role="alert" className="field-error">
+                    Could not load this food.{' '}
+                    <Button variant="secondary" onClick={() => food.refetch()}>
+                        Try again
+                    </Button>
+                </p>
+            )}
             <LiveNutrition nutrients={preview} pending={!amountReady || resolved.isFetching} />
+            {!onIngredients && <TrackingWhenFields value={when} onChange={onWhenChange} />}
             <div className="track-amount-entry">
                 <Field label={item.type === 'FOOD' ? 'Amount' : 'Servings'}>
                     <input
@@ -500,7 +643,11 @@ function AmountForm({
                         (item.type === 'FOOD' && !preview)
                     }
                 >
-                    {add.isPending ? 'Adding…' : 'Add to Food Log'}
+                    {add.isPending
+                        ? 'Adding…'
+                        : onIngredients
+                          ? 'Add ingredient'
+                          : 'Add to Food Log'}
                 </Button>
             </div>
         </form>
@@ -538,7 +685,7 @@ function defaultFoodUnit(food: Food) {
     return 'g'
 }
 
-function foodUnits(food: Food) {
+export function foodUnits(food: Food) {
     const units: Array<{ value: string; label: string }> = []
     if (food.basisType === 'PER_100_G' || food.densityGPerMl) units.push({ value: 'g', label: 'g' })
     if (food.basisType === 'PER_100_ML' || food.densityGPerMl)
@@ -568,12 +715,27 @@ function trackableFood(food: Food): Trackable {
     }
 }
 
-function QuickEntry({ onDone }: { onDone: () => void }) {
+function QuickEntry({
+    onDone,
+    when,
+    onWhenChange,
+    onFoodReady,
+}: {
+    onDone: () => void
+    when: TrackingWhen
+    onWhenChange: (when: TrackingWhen) => void
+    onFoodReady?: (food: Food) => void
+}) {
     const client = useQueryClient()
     const toast = useToast()
     const add = useMutation({
-        mutationFn: api.quickTrack,
-        onSuccess: () => {
+        mutationFn: (input: QuickFoodInput) =>
+            onFoodReady ? createQuickFood(input) : api.quickTrack(input),
+        onSuccess: (result) => {
+            if (onFoodReady) {
+                onFoodReady(result as Food)
+                return
+            }
             client.invalidateQueries({ queryKey: ['diary'] })
             toast.push('Added to Food Log')
             onDone()
@@ -583,16 +745,10 @@ function QuickEntry({ onDone }: { onDone: () => void }) {
     const submit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         const data = new FormData(event.currentTarget)
-        const trackedAt = new Date()
         add.mutate({
-            name: data.get('name'),
-            localDate: localDate(trackedAt),
-            consumedAt: trackedAt.toISOString(),
-            calories: numberOrNull(data.get('calories')),
-            proteinG: number(data.get('protein')),
-            carbohydrateG: number(data.get('carbs')),
-            fatG: number(data.get('fat')),
-            fiberG: numberOrNull(data.get('fiber')),
+            name: String(data.get('name')),
+            ...(onFoodReady ? {} : trackingTimestamp(when)),
+            ...readQuickNutrients(data),
             saveAsFood: data.get('save') === 'on',
         })
     }
@@ -601,33 +757,16 @@ function QuickEntry({ onDone }: { onDone: () => void }) {
             <Field label="Name" className="span-2">
                 <input name="name" required placeholder="Post-workout shake" />
             </Field>
-            <Field label="Calories">
-                <input
-                    name="calories"
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Calculated if empty"
-                />
-            </Field>
-            <Field label="Protein (g)">
-                <input name="protein" type="text" inputMode="decimal" defaultValue="0" />
-            </Field>
-            <Field label="Carbs (g)">
-                <input name="carbs" type="text" inputMode="decimal" defaultValue="0" />
-            </Field>
-            <Field label="Fat (g)">
-                <input name="fat" type="text" inputMode="decimal" defaultValue="0" />
-            </Field>
-            <Field label="Fiber (g)">
-                <input name="fiber" type="text" inputMode="decimal" />
-            </Field>
-            <p className="track-now span-2">Logged at the current date and time</p>
-            <label className="check span-2">
-                <input name="save" type="checkbox" />
-                Save for next time
-            </label>
+            <QuickNutrientFields />
+            {!onFoodReady && <TrackingWhenFields value={when} onChange={onWhenChange} />}
+            {!onFoodReady && (
+                <label className="check span-2">
+                    <input name="save" type="checkbox" />
+                    Save for next time
+                </label>
+            )}
             <Button className="span-2 track-primary-action" type="submit" disabled={add.isPending}>
-                {add.isPending ? 'Adding…' : 'Add to Food Log'}
+                {add.isPending ? 'Adding…' : onFoodReady ? 'Choose amount' : 'Add to Food Log'}
             </Button>
         </form>
     )
@@ -685,6 +824,31 @@ function formatAnchorHour(hour: number) {
     return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(value)
 }
 
-const number = (value: FormDataEntryValue | null) => parseDecimal(value || 0)
-const numberOrNull = (value: FormDataEntryValue | null) =>
-    value === '' || value == null ? null : parseDecimal(value)
+function CreateFoodEntry({
+    onFoodReady,
+    onBack,
+}: {
+    onFoodReady: (food: Food) => void
+    onBack: () => void
+}) {
+    const toast = useToast()
+    const definitions = useQuery({ queryKey: queryKeys.nutrients, queryFn: api.nutrients })
+    const save = useMutation({
+        mutationFn: (input: FoodInput) => api.createFood(input),
+        onSuccess: onFoodReady,
+        onError: (error) => toast.push('Could not create food', error.message, 'error'),
+    })
+    return (
+        <>
+            <button type="button" className="sheet-back" onClick={onBack}>
+                ← More options
+            </button>
+            <FoodForm
+                definitions={definitions.data}
+                pending={save.isPending}
+                submitLabel="Choose amount"
+                onSubmit={(input) => save.mutate(input)}
+            />
+        </>
+    )
+}

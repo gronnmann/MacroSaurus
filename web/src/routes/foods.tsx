@@ -269,6 +269,7 @@ export function FoodEditorPage() {
                         features.data?.aiLabelScan?.granted &&
                         features.data.aiLabelScan.available,
                 )}
+                labelPending={scan.isPending}
                 onLabelPhoto={id ? undefined : (file) => scan.mutate(file)}
                 submitLabel={id ? 'Save changes' : 'Create food'}
                 onSubmit={(input) => save.mutate(input)}

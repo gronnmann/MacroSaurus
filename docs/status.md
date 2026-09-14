@@ -54,7 +54,9 @@ This document separates implemented behavior from architecture planned for later
 - EAN/UPC checksum validation.
 - Browser-side barcode decoding; camera frames are never uploaded.
 - Exact Open Food Facts lookup and import.
-- Per-user, admin-granted single-photo OpenRouter extraction from barcode no-match or food creation.
+- Per-user, admin-granted label photo upload/capture from Track or food creation.
+- AI meal calorie and macro estimates from up to three photos with optional text,
+  with editable totals before logging.
 - Versioned normalized Matvaretabellen, USDA Foundation, and USDA SR Legacy release imports.
 - Searchable localized food aliases and source/release provenance.
 - Mandatory confirmation into a private food.

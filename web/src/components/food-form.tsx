@@ -4,6 +4,7 @@ import { useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { parseDecimal } from '../lib/utils'
 import type { Food, FoodInput, NutrientDefinition } from '../types'
+import { PhotoInput } from './photo-input'
 import { Button, Card, Field, SectionHeader } from './ui'
 
 const schema = z.object({
@@ -34,6 +35,7 @@ export function FoodForm({
     submitLabel = 'Save food',
     pending,
     aiLabelEnabled = false,
+    labelPending = false,
     onLabelPhoto,
     onSubmit,
 }: {
@@ -42,6 +44,7 @@ export function FoodForm({
     submitLabel?: string
     pending?: boolean
     aiLabelEnabled?: boolean
+    labelPending?: boolean
     onLabelPhoto?: (file: File) => void
     onSubmit: (input: FoodInput) => void
 }) {
@@ -137,19 +140,14 @@ export function FoodForm({
                     <p className="muted">
                         Take a clear photo, then review every extracted value before saving.
                     </p>
-                    <label className="button button--secondary">
-                        <Camera /> Take label photo
-                        <input
-                            hidden
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            capture="environment"
-                            onChange={(event) => {
-                                const file = event.target.files?.[0]
-                                if (file) onLabelPhoto(file)
-                            }}
-                        />
-                    </label>
+                    <PhotoInput
+                        subject="label photo"
+                        disabled={labelPending}
+                        onFiles={(files) => onLabelPhoto(files[0])}
+                    />
+                    {labelPending && (
+                        <p role="status">Reading the label… This can take a moment.</p>
+                    )}
                 </Card>
             )}
             <Card>

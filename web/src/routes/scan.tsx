@@ -4,6 +4,7 @@ import { Camera, FileImage, Keyboard, ScanLine, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { FoodForm } from '../components/food-form'
+import { PhotoInput } from '../components/photo-input'
 import {
     Badge,
     Button,
@@ -67,7 +68,12 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
         },
     })
     const scan = useMutation({
-        mutationFn: api.startScan,
+        mutationFn: async (file: File) =>
+            api.startScan({
+                image: await prepareLabelImage(file),
+                barcode: code || null,
+                localeHint: navigator.language,
+            }),
         onSuccess: (job) => navigate(`/scan/${job.id}`),
         onError: (error) => toast.push('Could not read label', error.message, 'error'),
     })
@@ -119,23 +125,6 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
             controls.current = undefined
         }
     }, [camera, lookUp])
-
-    const readLabel = async (file?: File) => {
-        if (!file) return
-        try {
-            scan.mutate({
-                image: await prepareLabelImage(file),
-                barcode: code,
-                localeHint: navigator.language,
-            })
-        } catch (error) {
-            toast.push(
-                'Could not open photo',
-                error instanceof Error ? error.message : undefined,
-                'error',
-            )
-        }
-    }
 
     return (
         <div className="scan-experience">
@@ -215,25 +204,33 @@ export function ScanExperience({ onFoodReady }: { onFoodReady?: (food: Food) => 
                     >
                         Create food manually
                     </Link>
-                    {aiEnabled && (
-                        <>
-                            <label className="upload-zone">
-                                <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp"
-                                    capture="environment"
-                                    onChange={(event) => readLabel(event.target.files?.[0])}
-                                />
-                                <FileImage />
-                                <b>Fill from a label photo</b>
-                                <span>JPEG, PNG, or WebP</span>
-                            </label>
-                            <small>
-                                The resized photo is sent for extraction and is not stored by
-                                Macrosaurus.
-                            </small>
-                        </>
+                </Card>
+            )}
+            {aiEnabled && (
+                <Card className="label-fallback">
+                    <SectionHeader
+                        eyebrow="AI LABEL READER"
+                        title="Fill from a label photo"
+                        aside={<FileImage />}
+                    />
+                    <p>
+                        Upload or take a clear photo of the nutrition table, then review the
+                        extracted values.
+                    </p>
+                    <PhotoInput
+                        subject="label photo"
+                        disabled={scan.isPending}
+                        onFiles={(files) => scan.mutate(files[0])}
+                    />
+                    {scan.isPending && (
+                        <p role="status">Reading the label… This can take a moment.</p>
                     )}
+                    {scan.error && (
+                        <p role="alert" className="field-error">
+                            {scan.error.message}
+                        </p>
+                    )}
+                    <small>The resized photo is sent to AI and is not stored by Macrosaurus.</small>
                 </Card>
             )}
         </div>

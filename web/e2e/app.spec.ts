@@ -526,15 +526,61 @@ test('weekly check-in reviews partial logging before accepting targets', async (
     await expect(page.getByRole('button', { name: 'Accept new targets' })).toBeEnabled()
 })
 
-test('label photo appears only after an unmatched barcode', async ({ page }) => {
+test('label photo is available without a barcode lookup', async ({ page }) => {
     await page.goto('/track')
     await page.getByRole('tab', { name: 'Scan' }).click()
-    await expect(page.getByText('Fill from a label photo')).toHaveCount(0)
+    await expect(page.getByText('Fill from a label photo')).toBeVisible()
     await page.getByLabel('Enter barcode').fill('3017620422003')
     await page.getByRole('button', { name: 'Look up' }).click()
     await expect(page.getByRole('link', { name: 'Create food manually' })).toBeVisible()
     await expect(page.getByText('Fill from a label photo')).toBeVisible()
-    await expect(page.locator('input[type=file]')).not.toHaveAttribute('multiple', '')
+    await expect(page.getByLabel('Upload label photo')).not.toHaveAttribute('capture')
+    await expect(page.getByLabel('Take label photo')).toHaveAttribute('capture', 'environment')
+})
+
+test('AI meal estimate submits a photo with text and logs reviewed calories', async ({ page }) => {
+    let estimateInput: { text: string; images: string[] } | undefined
+    let tracked: { calories: number } | undefined
+    await page.route('**/api/v1/meal-estimates', async (route) => {
+        estimateInput = route.request().postDataJSON()
+        await route.fulfill({
+            json: {
+                name: 'Chicken and rice',
+                calories: 650,
+                proteinG: 45,
+                carbohydrateG: 70,
+                fatG: 20,
+                fiberG: 3,
+                assumptions: ['Includes one tablespoon of oil'],
+            },
+        })
+    })
+    await page.route('**/api/v1/quick-entries', async (route) => {
+        tracked = route.request().postDataJSON()
+        await route.fulfill({ json: entry })
+    })
+    await page.goto('/track')
+    await page.getByRole('tab', { name: 'More' }).click()
+    await page.getByRole('button', { name: 'AI meal estimate' }).click()
+    await page.getByLabel('Upload meal photo').setInputFiles({
+        name: 'meal.png',
+        mimeType: 'image/png',
+        buffer: Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4ioAAAAASUVORK5CYII=',
+            'base64',
+        ),
+    })
+    await expect(page.getByAltText('Meal view 1')).toBeVisible()
+    await page.getByLabel('Meal description').fill('200 g chicken with rice and olive oil')
+    await page.getByRole('button', { name: 'Estimate calories' }).click()
+    await expect(page.getByLabel('Meal name')).toHaveValue('Chicken and rice')
+    expect(estimateInput?.text).toBe('200 g chicken with rice and olive oil')
+    expect(estimateInput?.images[0]).toMatch(/^data:image\/jpeg;base64,/)
+    expect(tracked).toBeUndefined()
+    await page.getByLabel('Calories', { exact: true }).fill('720')
+    await page.getByRole('button', { name: 'Add to Food Log' }).click()
+    await expect.poll(() => tracked?.calories).toBe(720)
+    await expect(page.getByRole('dialog', { name: 'Estimate a meal' })).toHaveCount(0)
 })
 
 test('mobile layout has the raised centered Track action', async ({ page }, testInfo) => {

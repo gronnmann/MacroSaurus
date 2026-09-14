@@ -7,6 +7,7 @@ import {
     MoreHorizontal,
     Scale,
     Search,
+    Sparkles,
     Utensils,
     X,
     Zap,
@@ -19,10 +20,11 @@ import { Button, Field, Skeleton, StatePanel, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
 import { formatNumber, kcal, localDate, parseDecimal } from '../lib/utils'
 import type { Food, Nutrients, Trackable } from '../types'
+import { MealEstimateEntry } from './meal-estimate'
 import { ScanExperience } from './scan'
 
-type TrackMode = 'search' | 'scan' | 'quick' | 'more' | 'weight'
-type TopTrackMode = Exclude<TrackMode, 'weight'>
+type TrackMode = 'search' | 'scan' | 'quick' | 'more' | 'weight' | 'estimate'
+type TopTrackMode = Exclude<TrackMode, 'weight' | 'estimate'>
 
 export function TrackPage() {
     const location = useLocation()
@@ -90,7 +92,7 @@ export function TrackPage() {
                     />
                 ) : (
                     <>
-                        {mode !== 'weight' && (
+                        {mode !== 'weight' && mode !== 'estimate' && (
                             <TrackTabs mode={mode} onMode={(next) => setMode(next)} />
                         )}
                         {mode === 'search' && (
@@ -106,7 +108,24 @@ export function TrackPage() {
                                 }
                             />
                         )}
-                        {mode === 'more' && <TrackMore onWeight={() => setMode('weight')} />}
+                        {mode === 'more' && (
+                            <TrackMore
+                                onWeight={() => setMode('weight')}
+                                onEstimate={() => setMode('estimate')}
+                            />
+                        )}
+                        {mode === 'estimate' && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="sheet-back"
+                                    onClick={() => setMode('more')}
+                                >
+                                    ← More tracking options
+                                </button>
+                                <MealEstimateEntry onDone={close} />
+                            </>
+                        )}
                         {mode === 'weight' && (
                             <>
                                 <button
@@ -156,10 +175,15 @@ function TrackTabs({ mode, onMode }: { mode: TopTrackMode; onMode: (mode: TopTra
     )
 }
 
-function TrackMore({ onWeight }: { onWeight: () => void }) {
+function TrackMore({ onWeight, onEstimate }: { onWeight: () => void; onEstimate: () => void }) {
     return (
         <div className="track-home">
             <div className="track-home-grid">
+                <button type="button" onClick={onEstimate}>
+                    <Sparkles />
+                    <b>AI meal estimate</b>
+                    <small>Photos and description</small>
+                </button>
                 <button type="button" onClick={onWeight}>
                     <Scale />
                     <b>Log weight</b>
@@ -651,6 +675,7 @@ function trackTitle(mode: TrackMode) {
     if (mode === 'search') return 'Find food or recipes'
     if (mode === 'quick') return 'Quick track'
     if (mode === 'weight') return 'Log weight'
+    if (mode === 'estimate') return 'Estimate a meal'
     if (mode === 'more') return 'More tracking options'
     return 'Scan a product'
 }

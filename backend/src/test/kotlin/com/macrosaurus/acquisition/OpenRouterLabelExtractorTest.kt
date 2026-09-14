@@ -2,6 +2,7 @@ package com.macrosaurus.acquisition
 
 import com.macrosaurus.acquisition.application.ExtractedNutrient
 import com.macrosaurus.acquisition.config.OpenRouterProperties
+import com.macrosaurus.acquisition.integration.OpenRouterClient
 import com.macrosaurus.acquisition.integration.OpenRouterLabelExtractor
 import com.macrosaurus.acquisition.integration.RawLabelExtraction
 import com.macrosaurus.catalog.BasisType
@@ -13,7 +14,7 @@ import java.math.BigDecimal
 class OpenRouterLabelExtractorTest {
     private val extractor =
         OpenRouterLabelExtractor(
-            OpenRouterProperties("https://example.invalid", "test", "test-model"),
+            OpenRouterClient(OpenRouterProperties("https://example.invalid", "test", "test-model"), ObjectMapper()),
             ObjectMapper(),
         )
 

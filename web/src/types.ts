@@ -437,3 +437,13 @@ export interface SharedSnapshot {
     snapshot: Food | Recipe
     expiresAt?: string
 }
+
+export interface MealEstimate {
+    name: string
+    calories: number
+    proteinG: number
+    carbohydrateG: number
+    fatG: number
+    fiberG: number | null
+    assumptions: string[]
+}

@@ -95,6 +95,22 @@ configured provider is unavailable. Catalog releases are imported directly from
 the production host rather than exposed as an HTTP endpoint; see the integrations
 guide for the operator command.
 
+## AI meal estimates
+
+`POST /meal-estimates` accepts `text` (up to 4,000 characters), `images` (up to
+three JPEG/PNG/WebP base64 data URLs, each up to 4,000,000 characters), and optional
+`localeHint` (up to 50 characters). Include at least a description or a photo.
+
+The response contains `name`, `calories` (kcal), `proteinG`, `carbohydrateG`,
+`fatG`, nullable `fiberG`, and an `assumptions` string array. Values are estimated
+totals for the whole meal. The request does not save images or create diary
+entries; submit reviewed values through `POST /quick-entries` to log the meal.
+
+The existing `ai-label-scan` grant controls meal estimation as well as label
+reading. Missing access returns 403, an unconfigured provider returns 503, and
+failed provider requests or unusable estimates return 502. Invalid request fields
+return 400; an empty description with no photos returns 422.
+
 ## Goal setup and weekly coaching
 
 The setup draft is persisted after each step, so an interrupted onboarding or

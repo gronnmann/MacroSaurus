@@ -40,7 +40,7 @@ export function AdminPage() {
             <PageHeader
                 eyebrow="ADMIN"
                 title="Feature access"
-                description="Enable paid AI label scanning only for users you trust. The server enforces every grant."
+                description="Enable paid AI label scanning and meal estimates only for users you trust. The server enforces every grant."
                 actions={
                     <Badge tone="green">
                         <ShieldCheck /> Administrator
@@ -67,7 +67,7 @@ export function AdminPage() {
                                     <b>{user.displayName}</b>
                                     <small>{user.userId}</small>
                                 </div>
-                                <span>AI label scan</span>
+                                <span>AI labels and meals</span>
                                 <label className="check">
                                     <input
                                         type="checkbox"

@@ -231,3 +231,25 @@ both image input and strict JSON Schema output.
 Confirm the web and backend use the same `SUPABASE_URL`, the project uses an
 asymmetric signing key, and both processes were restarted after changing
 variables. Use `VITE_AUTH_MODE=dev` only while `DEV_AUTH_ENABLED=true`.
+
+## AI labels and meal estimates
+
+The existing `ai-label-scan` user grant controls label reading and meal estimation.
+An administrator can manage both under **Feature access**. Both also require
+`OPENROUTER_API_KEY` and a vision model supporting structured outputs configured
+with `OPENROUTER_MODEL`. Requests retain the provider's `data_collection: deny`
+routing policy. See [OpenRouter structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs).
+
+- **Track → Scan**: upload or take a label photo directly, without a barcode lookup.
+- **Track → More → AI meal estimate**: submit up to three photos, a description,
+  or both. Review and edit estimated meal totals before adding to the Food Log.
+- `POST /api/v1/meal-estimates` accepts `text` (up to 4,000 characters), `images`
+  (up to three JPEG/PNG/WebP base64 data URLs, each up to 4,000,000 characters),
+  and optional `localeHint`. At least a description or photo is required.
+
+The browser resizes photos before submission; the backend does not persist meal
+photos or estimate requests. Only a subsequent confirmed tracking action saves
+nutrition values. Label jobs continue to retain extracted drafts for review.
+Provider errors distinguish missing credits, access configuration, unavailable
+models, rate limits, and connectivity failures. Server logs include HTTP status
+and model, never image data or provider response bodies.

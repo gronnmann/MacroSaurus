@@ -7,12 +7,14 @@ import type { Food } from '../types'
 import { ScanExperience } from './scan'
 
 const api = vi.hoisted(() => ({
+    features: vi.fn(),
     barcode: vi.fn(),
     importBarcode: vi.fn(),
     startScan: vi.fn(),
 }))
 
-vi.mock('../lib/api', () => ({ api, queryKeys: {} }))
+vi.mock('../lib/api', () => ({ api, queryKeys: { features: ['features'] } }))
+vi.mock('../lib/image', () => ({ prepareLabelImage: async () => 'data:image/jpeg;base64,YQ==' }))
 
 const food: Food = {
     id: 'food-id',
@@ -33,6 +35,7 @@ const food: Food = {
 describe('barcode scan', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        api.features.mockResolvedValue({ aiLabelScan: { granted: true, available: true } })
         api.barcode.mockResolvedValue([
             {
                 barcode: food.barcode,
@@ -68,4 +71,38 @@ describe('barcode scan', () => {
         await waitFor(() => expect(ready).toHaveBeenCalledWith(food))
         expect(screen.queryByText('Choose a product')).not.toBeInTheDocument()
     })
+})
+
+it('reads a label without a barcode and shows progress and retryable errors', async () => {
+    let rejectScan: (error: Error) => void = () => {}
+    api.features.mockResolvedValue({ aiLabelScan: { granted: true, available: true } })
+    api.startScan.mockImplementation(
+        () =>
+            new Promise((_resolve, reject) => {
+                rejectScan = reject
+            }),
+    )
+    const user = userEvent.setup()
+    render(
+        <MemoryRouter>
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <ScanExperience />
+                </ToastProvider>
+            </QueryClientProvider>
+        </MemoryRouter>,
+    )
+    await screen.findByRole('button', { name: 'Upload label photo' })
+    const input = screen.getByLabelText('Upload label photo')
+    const file = new File(['label'], 'label.jpg', { type: 'image/jpeg' })
+    await user.upload(input, file)
+    expect(await screen.findByRole('status')).toHaveTextContent('Reading the label')
+    expect(screen.getByRole('button', { name: 'Take label photo' })).toBeDisabled()
+    expect(api.startScan).toHaveBeenLastCalledWith(
+        expect.objectContaining({ barcode: null, image: 'data:image/jpeg;base64,YQ==' }),
+    )
+    rejectScan(new Error('AI credits are unavailable.'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('AI credits are unavailable')
+    await user.upload(input, file)
+    await waitFor(() => expect(api.startScan).toHaveBeenCalledTimes(2))
 })

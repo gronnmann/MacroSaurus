@@ -4,11 +4,8 @@ import com.macrosaurus.acquisition.application.ExtractedNutrient
 import com.macrosaurus.acquisition.application.LabelDraft
 import com.macrosaurus.acquisition.application.LabelExtractor
 import com.macrosaurus.acquisition.application.StartLabelScanCommand
-import com.macrosaurus.acquisition.config.OpenRouterProperties
 import com.macrosaurus.catalog.BasisType
 import com.macrosaurus.shared.ExternalServiceException
-import com.macrosaurus.shared.ServiceUnavailableException
-import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
 import tools.jackson.databind.ObjectMapper
 import java.math.BigDecimal
@@ -31,13 +28,10 @@ internal data class RawLabelExtraction(
 
 @Service
 internal class OpenRouterLabelExtractor(
-    private val properties: OpenRouterProperties,
+    private val client: OpenRouterClient,
     private val mapper: ObjectMapper,
 ) : LabelExtractor {
-    private val client = restClient(properties.baseUrl, properties.connectTimeout, properties.readTimeout)
-
     override fun extract(command: StartLabelScanCommand): LabelDraft {
-        if (properties.apiKey.isBlank()) throw ServiceUnavailableException("AI label scanning is temporarily unavailable")
         val content =
             mutableListOf<Map<String, Any>>(
                 mapOf(
@@ -85,43 +79,8 @@ internal class OpenRouterLabelExtractor(
                         "warnings",
                     ),
             )
-        val body =
-            mapOf(
-                "model" to properties.model,
-                "messages" to listOf(mapOf("role" to "user", "content" to content)),
-                "provider" to mapOf("require_parameters" to true, "data_collection" to "deny"),
-                "response_format" to
-                    mapOf(
-                        "type" to "json_schema",
-                        "json_schema" to mapOf("name" to "nutrition_label", "strict" to true, "schema" to schema),
-                    ),
-                "temperature" to 0,
-            )
-        val response =
-            try {
-                client
-                    .post()
-                    .uri("/chat/completions")
-                    .header("Authorization", "Bearer ${properties.apiKey}")
-                    .header("HTTP-Referer", "https://macrosaurus.app")
-                    .header("X-OpenRouter-Title", "Macrosaurus")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(String::class.java)
-            } catch (error: Exception) {
-                throw ExternalServiceException("Label extraction failed", error)
-            } ?: throw ExternalServiceException("Label extraction returned no response")
+        val contentJson = client.complete("nutrition_label", schema, content)
         return try {
-            val contentJson =
-                mapper
-                    .readTree(response)
-                    .path("choices")
-                    .path(0)
-                    .path("message")
-                    .path("content")
-                    .asString()
-            if (contentJson.isBlank()) throw ExternalServiceException("Label extraction returned no structured content")
             normalize(mapper.readValue(contentJson, RawLabelExtraction::class.java), command.barcode)
         } catch (error: ExternalServiceException) {
             throw error

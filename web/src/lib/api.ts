@@ -12,6 +12,7 @@ import type {
     FoodInput,
     GoalSettings,
     LastTrackedAmount,
+    MealEstimate,
     MyFeatures,
     NutrientDefinition,
     NutrientTarget,
@@ -209,6 +210,8 @@ export const api = {
         }),
     startScan: (input: { image: string; barcode?: string | null; localeHint?: string }) =>
         request<ScanJob>('/food-scans', { method: 'POST', body: body(input) }),
+    estimateMeal: (input: { text: string; images: string[]; localeHint?: string }) =>
+        request<MealEstimate>('/meal-estimates', { method: 'POST', body: body(input) }),
     scan: (id: string) => request<ScanJob>(`/food-scans/${id}`),
     confirmScan: (id: string, input: FoodInput) =>
         request<Food>(`/food-scans/${id}/confirm`, {
@@ -252,5 +255,7 @@ export const queryKeys = {
     weights: ['weights'] as const,
     expenditure: ['expenditure'] as const,
     progressSeries: (from: string, to: string) => ['progress-series', from, to] as const,
+    estimateMeal: (input: { text: string; images: string[]; localeHint?: string }) =>
+        request<MealEstimate>('/meal-estimates', { method: 'POST', body: body(input) }),
     scan: (id: string) => ['scan', id] as const,
 }

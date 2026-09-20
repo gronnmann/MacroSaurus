@@ -60,3 +60,7 @@ macrosaurus:
     model: ${OPENROUTER_MODEL:google/gemini-3.1-flash-lite}
     connect-timeout: ${OPENROUTER_CONNECT_TIMEOUT:5s}
     read-timeout: ${OPENROUTER_READ_TIMEOUT:90s}
+
+logging:
+  pattern:
+    level: "%5p [request_id=%X{requestId:-none}]"

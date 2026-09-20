@@ -111,8 +111,10 @@ internal class ScanService(
     }
 
     private fun requireAccess(userId: String) {
-        if (!features.enabled(userId, UserFeature.AI_LABEL_SCAN)) {
-            throw ForbiddenException("AI label scanning is not enabled for this user")
+        aiStage("nutrition_label", "access") {
+            if (!features.enabled(userId, UserFeature.AI_LABEL_SCAN)) {
+                throw ForbiddenException("AI label scanning is not enabled for this user")
+            }
         }
     }
 }

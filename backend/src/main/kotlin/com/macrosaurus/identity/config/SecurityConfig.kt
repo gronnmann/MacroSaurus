@@ -65,8 +65,8 @@ class SecurityConfig(
                 CorsConfiguration().apply {
                     allowedOrigins = web.allowedOrigins
                     allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                    allowedHeaders = listOf("Authorization", "Content-Type", "Idempotency-Key", "X-User-Id")
-                    exposedHeaders = listOf("ETag", "Location")
+                    allowedHeaders = listOf("Authorization", "Content-Type", "Idempotency-Key", "X-User-Id", "X-Request-ID")
+                    exposedHeaders = listOf("ETag", "Location", "X-Request-ID")
                 },
             )
         }

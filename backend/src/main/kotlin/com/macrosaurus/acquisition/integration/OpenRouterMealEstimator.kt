@@ -3,6 +3,7 @@ package com.macrosaurus.acquisition.integration
 import com.macrosaurus.acquisition.application.MealEstimate
 import com.macrosaurus.acquisition.application.MealEstimateCommand
 import com.macrosaurus.acquisition.application.MealEstimator
+import com.macrosaurus.acquisition.application.aiStage
 import com.macrosaurus.shared.ExternalServiceException
 import org.springframework.stereotype.Service
 import tools.jackson.databind.ObjectMapper
@@ -48,16 +49,18 @@ internal class OpenRouterMealEstimator(
                 ),
                 content,
             )
-        val result =
-            try {
-                mapper.readValue(json, MealEstimate::class.java)
-            } catch (error: Exception) {
-                throw ExternalServiceException("AI returned an unreadable estimate. Please try again.")
+        return aiStage("meal_estimate", "result_validation") {
+            val result =
+                try {
+                    mapper.readValue(json, MealEstimate::class.java)
+                } catch (error: Exception) {
+                    throw ExternalServiceException("AI returned an unreadable estimate. Please try again.", failureCategory = "malformed_result")
+                }
+            if (result.name.isBlank()) throw ExternalServiceException("AI could not identify a meal. Add a clearer photo or describe the food and amounts.", failureCategory = "unidentified_meal")
+            if (listOfNotNull(result.calories, result.proteinG, result.carbohydrateG, result.fatG, result.fiberG).any { it.signum() < 0 }) {
+                throw ExternalServiceException("AI returned invalid nutrition values. Please try again.", failureCategory = "invalid_nutrition")
             }
-        if (result.name.isBlank()) throw ExternalServiceException("AI could not identify a meal. Add a clearer photo or describe the food and amounts.")
-        if (listOfNotNull(result.calories, result.proteinG, result.carbohydrateG, result.fatG, result.fiberG).any { it.signum() < 0 }) {
-            throw ExternalServiceException("AI returned invalid nutrition values. Please try again.")
+            result
         }
-        return result
     }
 }

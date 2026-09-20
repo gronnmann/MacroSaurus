@@ -203,6 +203,46 @@ to the Supabase Data API cannot read an application table. The backend health
 endpoint is intentionally used by the private container health check rather
 than exposed through the public web proxy.
 
+## Request and AI diagnostics
+
+Backend stdout includes `request_start` and `request_complete` events for every
+`/api/` request, including authentication failures. Completion events include the
+HTTP method, matched route template, status and duration. Unmatched routes use
+`unmatched`; raw URLs, query values and request bodies are not logged.
+
+The browser sends `X-Request-ID`; the backend validates it or generates a new UUID,
+returns it in `X-Request-ID`, and includes `request_id` on correlated log entries.
+Use the browser Network panel to find this ID and search backend logs for it.
+If a proxy generated the error, use the ID from the browser request and correlate
+proxy logs by timestamp.
+
+AI events record access checks, provider calls, response validation, and result
+validation. `ai_request` includes image count and text character count (including
+the instruction prompt), but no content. `ai_response` records the HTTP status.
+`ai_usage` includes the OpenRouter generation ID, reported model/provider,
+finish reason, prompt/completion/reasoning token counts, and visible content
+character count. Missing usage counts are logged as `null`, not zero. The generation
+ID lets you locate the same request in OpenRouter. Completion counts can include
+reasoning tokens; use the separate reasoning count when the provider reports it.
+These diagnostics work with the configured model, including Qwen.
+
+Failures use stable categories such as `timeout`, `connection_failure`,
+`http_rejection`, `provider_error`, `incomplete_response`, `malformed_result`, and
+`invalid_nutrition`. API keys, prompts, images, generated text, reasoning content,
+and provider error bodies are excluded from application logs. Unexpected errors
+include exception types and stack frames without exception messages.
+
+```bash
+docker compose --env-file .env.production -f compose.production.yml logs --since=10m backend web
+sudo tail -n 100 /var/log/nginx/error.log
+```
+
+After deploying, test a text-only meal estimate and one with a photo. Match their
+request IDs across the API and AI stage logs and their generation IDs in OpenRouter.
+The logging change does not alter model selection, generation parameters, schemas,
+or timeouts. Provider token usage and latency require a real request to diagnose;
+logs from tests use a local fake provider.
+
 ## Updates and rollback
 
 Back up the database through the managed provider before releases containing

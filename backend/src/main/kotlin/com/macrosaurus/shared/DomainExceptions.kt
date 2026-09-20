@@ -15,6 +15,7 @@ class InvalidOperationException(
 class ExternalServiceException(
     message: String,
     cause: Throwable? = null,
+    val failureCategory: String = "external_service",
 ) : RuntimeException(message, cause)
 
 class ServiceUnavailableException(

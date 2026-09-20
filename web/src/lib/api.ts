@@ -40,7 +40,10 @@ export function setTokenProvider(provider: () => Promise<string | undefined>) {
 }
 
 export class ApiError extends Error {
-    constructor(public problem: ProblemDetails) {
+    constructor(
+        public problem: ProblemDetails,
+        public requestId?: string,
+    ) {
         super(problem.detail)
         this.name = 'ApiError'
     }
@@ -52,7 +55,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
             status: 0,
             detail: 'You are offline. Reconnect before saving changes.',
         })
+    const requestId = crypto.randomUUID()
     const headers = new Headers(init.headers)
+    headers.set('X-Request-ID', requestId)
     if (init.body) headers.set('Content-Type', 'application/json')
     if (authConfig.mode === 'dev') headers.set('X-User-Id', authConfig.devUserId)
     else {
@@ -62,11 +67,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`/api/v1${path}`, { ...init, headers })
     if (!response.ok) {
         const raw = (await response.json().catch(() => ({}))) as Partial<ProblemDetails>
-        throw new ApiError({
-            status: response.status,
-            detail: raw.detail || response.statusText || 'Request failed',
-            ...raw,
-        })
+        throw new ApiError(
+            {
+                status: response.status,
+                detail: raw.detail || response.statusText || 'Request failed',
+                ...raw,
+            },
+            response.headers.get('X-Request-ID') || requestId,
+        )
     }
     if (response.status === 204) return undefined as T
     const text = await response.text()

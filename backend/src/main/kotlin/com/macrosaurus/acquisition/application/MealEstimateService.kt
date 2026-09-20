@@ -36,7 +36,9 @@ internal class MealEstimateService(
         userId: String,
         command: MealEstimateCommand,
     ): MealEstimate {
-        if (!features.enabled(userId, UserFeature.AI_LABEL_SCAN)) throw ForbiddenException("AI meal estimation is not enabled for this user")
+        aiStage("meal_estimate", "access") {
+            if (!features.enabled(userId, UserFeature.AI_LABEL_SCAN)) throw ForbiddenException("AI meal estimation is not enabled for this user")
+        }
         if (command.text.isBlank() && command.images.isEmpty()) throw InvalidOperationException("Add a photo or describe your meal.")
         return estimator.estimate(command.copy(text = command.text.trim()))
     }

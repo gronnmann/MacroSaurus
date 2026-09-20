@@ -4,6 +4,7 @@ import com.macrosaurus.acquisition.application.ExtractedNutrient
 import com.macrosaurus.acquisition.application.LabelDraft
 import com.macrosaurus.acquisition.application.LabelExtractor
 import com.macrosaurus.acquisition.application.StartLabelScanCommand
+import com.macrosaurus.acquisition.application.aiStage
 import com.macrosaurus.catalog.BasisType
 import com.macrosaurus.shared.ExternalServiceException
 import org.springframework.stereotype.Service
@@ -80,12 +81,14 @@ internal class OpenRouterLabelExtractor(
                     ),
             )
         val contentJson = client.complete("nutrition_label", schema, content)
-        return try {
-            normalize(mapper.readValue(contentJson, RawLabelExtraction::class.java), command.barcode)
-        } catch (error: ExternalServiceException) {
-            throw error
-        } catch (error: Exception) {
-            throw ExternalServiceException("Label extraction returned malformed structured content", error)
+        return aiStage("nutrition_label", "result_validation") {
+            try {
+                normalize(mapper.readValue(contentJson, RawLabelExtraction::class.java), command.barcode)
+            } catch (error: ExternalServiceException) {
+                throw error
+            } catch (error: Exception) {
+                throw ExternalServiceException("AI returned an unreadable label. Please try again.", failureCategory = "malformed_result")
+            }
         }
     }
 

@@ -6,10 +6,13 @@ import com.macrosaurus.shared.InvalidOperationException
 import com.macrosaurus.shared.NotFoundException
 import com.macrosaurus.shared.ServiceUnavailableException
 import jakarta.validation.ConstraintViolationException
+import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
+import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.ErrorResponse
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
@@ -50,6 +53,14 @@ internal class ApiExceptionHandler {
 
     @ExceptionHandler(ServiceUnavailableException::class)
     fun unavailable(error: ServiceUnavailableException) = problem(HttpStatus.SERVICE_UNAVAILABLE, error.message ?: "Service unavailable")
+
+    @ExceptionHandler(Exception::class)
+    fun unexpected(error: Exception): ResponseEntity<ProblemDetail> {
+        // Preserve Spring's standard HTTP errors (e.g. unsupported methods and media types).
+        if (error is ErrorResponse) return ResponseEntity(error.body, error.headers, error.statusCode)
+        LoggerFactory.getLogger(javaClass).error("request_unexpected exception={}", safeStackTrace(error))
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(problem(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred. Please try again."))
+    }
 
     private fun problem(
         status: HttpStatus,

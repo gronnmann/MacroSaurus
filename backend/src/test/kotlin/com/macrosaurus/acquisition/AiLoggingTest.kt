@@ -5,6 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.macrosaurus.acquisition.application.MealEstimateCommand
 import com.macrosaurus.acquisition.config.OpenRouterProperties
+import com.macrosaurus.acquisition.integration.AiOperation
 import com.macrosaurus.acquisition.integration.OpenRouterClient
 import com.macrosaurus.acquisition.integration.OpenRouterMealEstimator
 import com.macrosaurus.shared.ExternalServiceException
@@ -84,7 +85,7 @@ class AiLoggingTest {
         val client = client(Duration.ofMillis(500))
         val started = System.nanoTime()
         try {
-            assertThatThrownBy { client.complete("meal_estimate", emptyMap(), emptyList()) }
+            assertThatThrownBy { client.complete(AiOperation.MEAL_ESTIMATE, emptyMap(), emptyList()) }
                 .isInstanceOf(ExternalServiceException::class.java)
                 .hasMessageContaining("too long")
             assertThat(arrived.count).isZero()
@@ -99,9 +100,9 @@ class AiLoggingTest {
     @Test
     fun `connection errors are classified and missing configuration makes no request`() {
         val port = ServerSocket(0).use { it.localPort }
-        assertThatThrownBy { client(url = "http://127.0.0.1:$port").complete("meal_estimate", emptyMap(), emptyList()) }
+        assertThatThrownBy { client(url = "http://127.0.0.1:$port").complete(AiOperation.MEAL_ESTIMATE, emptyMap(), emptyList()) }
             .hasMessageContaining("could not be reached")
-        assertThatThrownBy { client(key = "").complete("meal_estimate", emptyMap(), emptyList()) }
+        assertThatThrownBy { client(key = "").complete(AiOperation.MEAL_ESTIMATE, emptyMap(), emptyList()) }
             .hasMessageContaining("unavailable")
         assertThat(logs.list.map { it.formattedMessage })
             .anyMatch { it.contains("category=connection_failure") }

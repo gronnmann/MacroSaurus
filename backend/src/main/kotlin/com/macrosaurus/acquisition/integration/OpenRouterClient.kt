@@ -2,6 +2,7 @@ package com.macrosaurus.acquisition.integration
 
 import com.macrosaurus.acquisition.application.aiStage
 import com.macrosaurus.acquisition.config.OpenRouterProperties
+import com.macrosaurus.acquisition.config.ReasoningEffort
 import com.macrosaurus.shared.ExternalServiceException
 import com.macrosaurus.shared.ServiceUnavailableException
 import org.slf4j.LoggerFactory
@@ -12,6 +13,13 @@ import org.springframework.web.client.RestClientResponseException
 import tools.jackson.databind.ObjectMapper
 import java.net.SocketTimeoutException
 
+internal enum class AiOperation(
+    val schemaName: String,
+) {
+    MEAL_ESTIMATE("meal_estimate"),
+    NUTRITION_LABEL("nutrition_label"),
+}
+
 @Service
 internal class OpenRouterClient(
     private val properties: OpenRouterProperties,
@@ -21,14 +29,20 @@ internal class OpenRouterClient(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     fun complete(
-        name: String,
+        operation: AiOperation,
         schema: Map<String, Any>,
         content: List<Map<String, Any>>,
     ): String =
-        aiStage(name, "provider", properties.model) {
+        aiStage(operation.schemaName, "provider", properties.model) {
+            val name = operation.schemaName
+            val maxTokens =
+                when (operation) {
+                    AiOperation.MEAL_ESTIMATE -> properties.mealMaxTokens
+                    AiOperation.NUTRITION_LABEL -> properties.labelMaxTokens
+                }
             if (properties.apiKey.isBlank()) throw ServiceUnavailableException("AI is temporarily unavailable. Please try again later.")
             val body =
-                mapOf(
+                mutableMapOf<String, Any>(
                     "model" to properties.model,
                     "messages" to listOf(mapOf("role" to "user", "content" to content)),
                     "provider" to mapOf("require_parameters" to true, "data_collection" to "deny"),
@@ -38,12 +52,18 @@ internal class OpenRouterClient(
                             "json_schema" to mapOf("name" to name, "strict" to true, "schema" to schema),
                         ),
                     "temperature" to 0,
+                    "max_tokens" to maxTokens,
                 )
+            if (properties.reasoningEffort != ReasoningEffort.DEFAULT) {
+                body["reasoning"] = mapOf("effort" to properties.reasoningEffort.name.lowercase(), "exclude" to true)
+            }
             logger.info(
-                "ai_request operation={} image_count={} text_chars={} response_format=json_schema strict=true",
+                "ai_request operation={} image_count={} text_chars={} response_format=json_schema strict=true max_tokens={} reasoning_effort={}",
                 name,
                 content.count { it["type"] == "image_url" },
                 content.sumOf { (it["text"] as? String)?.length ?: 0 },
+                maxTokens,
+                properties.reasoningEffort.name.lowercase(),
             )
             val response =
                 try {
@@ -102,7 +122,7 @@ internal class OpenRouterClient(
                 throw ExternalServiceException(providerError(status), failureCategory = "provider_error")
             }
             if (choice.path("finish_reason").asString("") == "length") {
-                throw ExternalServiceException("AI returned an incomplete result. Please try again with a clearer photo or shorter description.", failureCategory = "incomplete_response")
+                throw ExternalServiceException("AI returned an incomplete result within the response limit. Try a simpler description or clearer photo; if this persists, contact the administrator.", failureCategory = "incomplete_response")
             }
             val message = choice.path("message")
             if (message.hasNonNull("refusal")) throw ExternalServiceException("AI could not read this input. Please try another photo or description.", failureCategory = "refused_response")

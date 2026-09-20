@@ -239,8 +239,9 @@ sudo tail -n 100 /var/log/nginx/error.log
 
 After deploying, test a text-only meal estimate and one with a photo. Match their
 request IDs across the API and AI stage logs and their generation IDs in OpenRouter.
-The logging change does not alter model selection, generation parameters, schemas,
-or timeouts. Provider token usage and latency require a real request to diagnose;
+Generation budgets and reasoning effort are configured through Compose; see
+[AI generation budgets](integrations.md#generation-budgets). `ai_request` records
+the effective ceiling and reasoning effort. Provider token usage and latency require a real request to diagnose;
 logs from tests use a local fake provider.
 
 ## Updates and rollback

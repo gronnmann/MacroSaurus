@@ -122,6 +122,42 @@ Provider routing includes:
 Model selection is configuration, not a domain decision. A replacement model must
 support image input and `json_schema` response formatting.
 
+### Generation budgets
+
+Both AI features send `max_tokens` using separate configurable ceilings:
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENROUTER_MEAL_MAX_TOKENS` | `1024` | Small meal total with at most four short assumptions |
+| `OPENROUTER_LABEL_MAX_TOKENS` | `4096` | Larger JSON with two nutrient columns and label text |
+| `OPENROUTER_REASONING_EFFORT` | `none` | Disable optional reasoning through OpenRouter's unified controls |
+
+The application permits meal ceilings of 256–8192 and label ceilings of
+1024–16384 tokens, rejecting invalid configuration at startup. These are ceilings,
+not target output lengths. Meal names are limited to 120 characters and assumptions
+to four items of 160 characters each, in both the schema and backend validation.
+Images are already resized before upload; label image detail is retained for OCR.
+
+Reasoning settings are model agnostic: `none`, `minimal`, `low`, or `default`.
+`none` sends `reasoning: {"effort":"none","exclude":true}`. `minimal` and `low`
+request limited thinking when a model requires it. `default` omits the reasoning
+object for models without that control; it can permit more reasoning. Merely hiding
+reasoning with `exclude` does not save computation. Choose a setting the configured
+model/provider supports; `require_parameters: true` remains enabled and the app
+does not retry with weaker controls if a provider rejects the request.
+
+On most providers `max_tokens` covers reasoning plus visible output. Models that
+require thinking may need more room to finish the JSON; tune the per-operation
+ceiling using `ai_request` settings and `ai_usage` finish reason/token counts.
+See [OpenRouter reasoning controls](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+No model names are hardcoded into generation policy and model selection is unchanged.
+
+A response with `finish_reason: length` is rejected even if its partial content
+looks like valid JSON. No automatic retry, budget increase, or partial result is
+used. The strict JSON schema and existing nutrition validation remain in effect.
+These controls bound generation; they do not guarantee nutrition accuracy or a
+particular provider response time.
+
 Privacy behavior:
 
 - Image data is held in request memory and forwarded to OpenRouter.
@@ -134,7 +170,7 @@ Privacy behavior:
 Current limitations:
 
 - Extraction is synchronous and can hold an HTTP request open.
-- There is no retry/backoff, cost budget, provider fallback, or circuit breaker.
+- There is no application retry/backoff, monetary spend budget, model fallback, or circuit breaker.
 - Scan expiry is stored but there is no scheduled cleanup.
 - MinIO is provisioned locally but is not connected.
 - Provider privacy and data-retention terms still need production review.

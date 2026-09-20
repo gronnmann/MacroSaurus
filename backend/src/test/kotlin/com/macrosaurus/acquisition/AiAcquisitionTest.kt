@@ -5,6 +5,8 @@ import com.macrosaurus.acquisition.application.MealEstimateService
 import com.macrosaurus.acquisition.application.MealEstimator
 import com.macrosaurus.acquisition.application.StartLabelScanCommand
 import com.macrosaurus.acquisition.config.OpenRouterProperties
+import com.macrosaurus.acquisition.config.ReasoningEffort
+import com.macrosaurus.acquisition.integration.AiOperation
 import com.macrosaurus.acquisition.integration.OpenRouterClient
 import com.macrosaurus.acquisition.integration.OpenRouterLabelExtractor
 import com.macrosaurus.acquisition.integration.OpenRouterMealEstimator
@@ -27,6 +29,7 @@ class AiAcquisitionTest {
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply { start() }
     private val client = OpenRouterClient(OpenRouterProperties("http://127.0.0.1:${server.address.port}", "test-key", "test-model"), mapper)
     private var request = ""
+    private var requestCount = 0
 
     @AfterEach
     fun stop() = server.stop(0)
@@ -36,6 +39,7 @@ class AiAcquisitionTest {
         status: Int = 200,
     ) {
         server.createContext("/chat/completions") { exchange ->
+            requestCount++
             request = exchange.requestBody.bufferedReader().readText()
             val bytes = content.toByteArray()
             exchange.responseHeaders.add("Content-Type", "application/json")
@@ -53,6 +57,9 @@ class AiAcquisitionTest {
         assertThat(draft.name).isEqualTo("Milk")
         assertThat(draft.nutrients.single().amount).isEqualByComparingTo("43")
         val body = mapper.readTree(request)
+        assertThat(body.path("max_tokens").asInt()).isEqualTo(4096)
+        assertThat(body.path("reasoning").path("effort").asString()).isEqualTo("none")
+        assertThat(body.path("reasoning").path("exclude").asBoolean()).isTrue()
         assertThat(
             body
                 .path("messages")
@@ -78,6 +85,20 @@ class AiAcquisitionTest {
         respond(completion("""{"name":"Chicken and rice","calories":650,"proteinG":45,"carbohydrateG":70,"fatG":20,"fiberG":3,"assumptions":["Includes one tablespoon of oil"]}"""))
         val result = OpenRouterMealEstimator(client, mapper).estimate(MealEstimateCommand("200 g chicken, rice, 1 tbsp oil", listOf("data:image/jpeg;base64,YQ==", "data:image/png;base64,Yg=="), "en"))
         assertThat(result.calories).isEqualByComparingTo("650")
+        val body = mapper.readTree(request)
+        assertThat(body.path("max_tokens").asInt()).isEqualTo(1024)
+        assertThat(body.path("reasoning").path("effort").asString()).isEqualTo("none")
+        val schema = body.path("response_format").path("json_schema")
+        assertThat(schema.path("strict").asBoolean()).isTrue()
+        assertThat(
+            schema
+                .path("schema")
+                .path("properties")
+                .path("assumptions")
+                .path("maxItems")
+                .asInt(),
+        ).isEqualTo(4)
+        assertThat(body.path("provider").path("require_parameters").asBoolean()).isTrue()
         assertThat(result.assumptions).containsExactly("Includes one tablespoon of oil")
         val content =
             mapper
@@ -99,7 +120,7 @@ class AiAcquisitionTest {
     @Test
     fun `HTTP provider errors explain configuration issues without exposing upstream body`() {
         respond("""{"error":{"message":"sensitive upstream details"}}""", 402)
-        assertThatThrownBy { client.complete("test", emptyMap(), emptyList()) }.isInstanceOf(ExternalServiceException::class.java).hasMessageContaining("credits").hasMessageNotContaining("sensitive")
+        assertThatThrownBy { client.complete(AiOperation.MEAL_ESTIMATE, emptyMap(), emptyList()) }.isInstanceOf(ExternalServiceException::class.java).hasMessageContaining("credits").hasMessageNotContaining("sensitive")
     }
 
     @Test
@@ -113,7 +134,58 @@ class AiAcquisitionTest {
     @Test
     fun `missing API key returns service unavailable`() {
         val unconfigured = OpenRouterClient(OpenRouterProperties("https://example.invalid", "", "test"), mapper)
-        assertThatThrownBy { unconfigured.complete("test", emptyMap(), emptyList()) }.isInstanceOf(ServiceUnavailableException::class.java)
+        assertThatThrownBy { unconfigured.complete(AiOperation.MEAL_ESTIMATE, emptyMap(), emptyList()) }.isInstanceOf(ServiceUnavailableException::class.java)
+    }
+
+    @Test
+    fun `budgets and reasoning are configurable independently of model identity`() {
+        respond(completion("{}"))
+        for (effort in ReasoningEffort.entries) {
+            val properties = OpenRouterProperties("http://127.0.0.1:${server.address.port}", "test-key", "arbitrary/provider-model", mealMaxTokens = 768, labelMaxTokens = 3072, reasoningEffort = effort)
+            val configured = OpenRouterClient(properties, mapper)
+            for ((operation, expectedBudget) in listOf(AiOperation.MEAL_ESTIMATE to 768, AiOperation.NUTRITION_LABEL to 3072)) {
+                configured.complete(operation, emptyMap(), emptyList())
+                val body = mapper.readTree(request)
+                assertThat(body.path("model").asString()).isEqualTo("arbitrary/provider-model")
+                assertThat(body.path("max_tokens").asInt()).isEqualTo(expectedBudget)
+                if (effort == ReasoningEffort.DEFAULT) {
+                    assertThat(body.has("reasoning")).isFalse()
+                } else {
+                    assertThat(body.path("reasoning").path("effort").asString()).isEqualTo(effort.name.lowercase())
+                    assertThat(body.path("reasoning").path("exclude").asBoolean()).isTrue()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `token-limited responses are rejected without another paid request even with valid JSON`() {
+        respond("""{"choices":[{"finish_reason":"length","message":{"content":"{}"}}],"usage":{"completion_tokens":1024}}""")
+        assertThatThrownBy { client.complete(AiOperation.MEAL_ESTIMATE, emptyMap(), emptyList()) }
+            .isInstanceOf(ExternalServiceException::class.java)
+            .hasMessageContaining("response limit")
+        assertThat(requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `provider rejection does not trigger an unrestricted fallback`() {
+        respond("""{"error":{"message":"unsupported reasoning setting"}}""", 400)
+        assertThatThrownBy { client.complete(AiOperation.MEAL_ESTIMATE, emptyMap(), emptyList()) }.isInstanceOf(ExternalServiceException::class.java)
+        assertThat(requestCount).isEqualTo(1)
+        assertThat(mapper.readTree(request).path("max_tokens").asInt()).isEqualTo(1024)
+    }
+
+    @Test
+    fun `overlong assumptions are rejected even if a provider ignores schema bounds`() {
+        respond(completion("""{"name":"Meal","calories":100,"proteinG":1,"carbohydrateG":1,"fatG":1,"fiberG":null,"assumptions":["1","2","3","4","5"]}"""))
+        assertThatThrownBy { OpenRouterMealEstimator(client, mapper).estimate(MealEstimateCommand("Meal", emptyList(), null)) }.hasMessageContaining("overly long")
+    }
+
+    @Test
+    fun `invalid token budgets fail before a provider request`() {
+        assertThatThrownBy { OpenRouterProperties("https://example.invalid", "", "any", mealMaxTokens = 0) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { OpenRouterProperties("https://example.invalid", "", "any", labelMaxTokens = 100000) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(requestCount).isZero()
     }
 
     @Test

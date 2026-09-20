@@ -39,7 +39,7 @@ internal class OpenRouterLabelExtractor(
                     "type" to "text",
                     "text" to
                         "Extract product identity and every printed nutrition value separately for per-100 and per-serving columns. " +
-                        "Use only the allowed nutrient codes and units. Convert neither values nor units and do not guess missing values. " +
+                        "Use only the allowed nutrient codes and units, once per column. Convert neither values nor units and do not guess missing values. Return only compact JSON; keep warnings brief and avoid repeating information. " +
                         "per100BasisUnit must be g or ml only when a per-100 column exists. Locale hint: ${command.localeHint ?: "unknown"}. " +
                         "Barcode hint: ${command.barcode ?: "none"}.",
                 ),
@@ -80,7 +80,7 @@ internal class OpenRouterLabelExtractor(
                         "warnings",
                     ),
             )
-        val contentJson = client.complete("nutrition_label", schema, content)
+        val contentJson = client.complete(AiOperation.NUTRITION_LABEL, schema, content)
         return aiStage("nutrition_label", "result_validation") {
             try {
                 normalize(mapper.readValue(contentJson, RawLabelExtraction::class.java), command.barcode)

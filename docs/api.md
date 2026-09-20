@@ -28,6 +28,31 @@ X-User-Id: demo-user
 
 Without either, the local identity is `dev-user`.
 
+## Food and recipe search
+
+`GET /foods?query=...` and `GET /trackables?query=...&type=ALL|FOOD|RECIPE`
+match every query word, in any order, against the current food name or a localized
+alias, together with its brand. Recipes match their current name. Matching ignores
+case, punctuation, and extra whitespace and preserves Norwegian letters.
+
+Whole-word results are returned first. Only when there are none does search try
+word prefixes (two or more characters), then typos (four or more characters,
+strict word similarity above 0.4). Trackables chooses the fallback stage across
+both selected types. Shorter words still require an exact match. A nonblank query
+containing only punctuation returns no results. Barcodes require an exact match.
+
+Catalog results prioritize exact names, the main name before a comma, leading
+phrases, other name/alias matches, combined name-and-brand matches, then brand-only
+matches. Trackables keeps matching recently logged items first, newest use first,
+then applies relevance. Thus a recently used peanut butter can lead a `butter`
+search, while other plain butter results rank ahead of butter oil and peanut
+butter. Buttermilk is excluded while whole-word butter matches exist.
+
+Limits apply after ranking (maximum 100). Inactive foods, historical names, and
+other users' private items are excluded. Blank search retains browsing and recent
+items. Existing aliases support Norwegian lookup; search does not translate or
+expand synonyms such as `unsalted` into `without salt`.
+
 ## Errors
 
 Domain and validation failures use RFC 9457-style problem responses:

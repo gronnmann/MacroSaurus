@@ -15,6 +15,8 @@ import com.macrosaurus.shared.InvalidOperationException
 import com.macrosaurus.shared.NotFoundException
 import com.macrosaurus.shared.NutrientMath
 import com.macrosaurus.shared.NutrientValues
+import com.macrosaurus.shared.SearchHit
+import com.macrosaurus.shared.SearchStage
 import com.macrosaurus.tracking.DailyNutrition
 import com.macrosaurus.tracking.DiaryEntrySnapshot
 import com.macrosaurus.tracking.DiaryEntryType
@@ -457,6 +459,7 @@ internal class TrackingService(
         limit: Int,
     ): List<Trackable> {
         val safeLimit = limit.coerceIn(1, 100)
+        if (query.isNotBlank()) return searchTrackables(userId, query, type, safeLimit)
         val foods =
             if (type in setOf(TrackableType.ALL, TrackableType.FOOD)) {
                 catalog.search(userId, query, safeLimit).map(::foodTrackable)
@@ -465,25 +468,16 @@ internal class TrackingService(
             }
         val recipeSnapshots =
             if (type in setOf(TrackableType.ALL, TrackableType.RECIPE)) recipes.list(userId) else emptyList()
-        val recipes =
-            recipeSnapshots
-                .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
-                .map(::recipeTrackable)
+        val recipes = recipeSnapshots.map(::recipeTrackable)
 
         val recentUses =
             repository
                 .findRecentTrackableUses(userId, 100)
                 .filter { type == TrackableType.ALL || it.entryType.name == type.name }
         val recentTrackables = materializeTrackables(userId, recentUses, recipeSnapshots)
-        val matchingRecent =
-            recentTrackables.values.filter { item ->
-                query.isBlank() ||
-                    item.name.contains(query.trim(), ignoreCase = true) ||
-                    item.brand?.contains(query.trim(), ignoreCase = true) == true
-            }
         val recency = recentUses.associate { TrackableKey(it.entryType.name, it.entityId) to it.createdAt }
         val merged = linkedMapOf<TrackableKey, Trackable>()
-        (matchingRecent + foods + recipes).forEach { item -> merged.putIfAbsent(TrackableKey(item.type, item.id), item) }
+        (recentTrackables.values + foods + recipes).forEach { item -> merged.putIfAbsent(TrackableKey(item.type, item.id), item) }
         return merged.values
             .sortedWith { left, right ->
                 val leftRecent = recency[TrackableKey(left.type, left.id)]
@@ -495,6 +489,50 @@ internal class TrackingService(
                     else -> left.name.compareTo(right.name, ignoreCase = true)
                 }
             }.take(safeLimit)
+    }
+
+    private fun searchTrackables(
+        userId: String,
+        query: String,
+        type: TrackableType,
+        limit: Int,
+    ): List<Trackable> {
+        val recentUses =
+            repository
+                .findRecentTrackableUses(userId, 100)
+                .filter { type == TrackableType.ALL || it.entryType.name == type.name }
+        val recency = recentUses.associate { TrackableKey(it.entryType.name, it.entityId) to it.createdAt }
+        val recentFoodIds = recentUses.filter { it.entryType == DiaryEntryType.FOOD }.map { it.entityId }
+        val recentRecipeIds = recentUses.filter { it.entryType == DiaryEntryType.RECIPE }.map { it.entityId }
+        for (stage in SearchStage.entries) {
+            val foods = if (type != TrackableType.RECIPE) catalog.searchHits(userId, query, stage, limit, recentFoodIds) else emptyList()
+            val recipeHits = if (type != TrackableType.FOOD) recipes.searchHits(userId, query, stage, limit, recentRecipeIds) else emptyList()
+            val hits = foods.map { TrackableKey("FOOD", it.id) to it } + recipeHits.map { TrackableKey("RECIPE", it.id) to it }
+            if (hits.isEmpty()) continue
+            val selected =
+                hits
+                    .sortedWith { left, right ->
+                        val leftRecent = recency[left.first]
+                        val rightRecent = recency[right.first]
+                        val recentOrder =
+                            when {
+                                leftRecent != null && rightRecent == null -> -1
+                                leftRecent == null && rightRecent != null -> 1
+                                leftRecent != null && rightRecent != null -> rightRecent.compareTo(leftRecent)
+                                else -> 0
+                            }
+                        if (recentOrder != 0) recentOrder else SearchHit.relevance.compare(left.second, right.second)
+                    }.take(limit)
+            val selectedFoods = catalog.byRevisions(userId, selected.filter { it.first.type == "FOOD" }.map { it.second.revisionId })
+            return selected.map { (key, hit) ->
+                if (key.type == "FOOD") {
+                    foodTrackable(selectedFoods.getValue(hit.revisionId))
+                } else {
+                    recipeTrackable(recipes.getByRevision(userId, hit.revisionId))
+                }
+            }
+        }
+        return emptyList()
     }
 
     fun lastTrackedAmount(

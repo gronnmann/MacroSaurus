@@ -14,6 +14,8 @@ Flyway applies migrations in order:
 | `V6__tracking_history_indexes.sql` | History lookup indexes |
 | `V7__adaptive_coaching.sql` | Setup drafts, weight goals, program revisions, check-ins, day review, and uncertainty fields |
 | `V8__catalog_sources_features_and_mealless_diary.sql` | Source releases/aliases/provenance, feature grants, expanded nutrients, and meal removal |
+| `V9__finalize_adaptive_coaching_schema.sql` | Final adaptive coaching schema cleanup |
+| `V10__ranked_catalog_search.sql` | Word normalization, relevance ranking, and trigram indexes for food/recipe search |
 
 Never edit a migration after it has been applied outside an expendable local
 database. Add a new numbered migration.

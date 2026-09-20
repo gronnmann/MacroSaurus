@@ -239,3 +239,12 @@ instance when a migration itself must be rolled back.
   enabling those integrations publicly.
 - Complete account export/deletion, retention jobs, rate limiting, and security
   review before treating the pre-release application as production-ready.
+
+## Search migration
+
+Flyway migration V10 enables PostgreSQL `pg_trgm`, installs search functions, and
+builds GIN indexes on food names/brands, localized aliases, and recipe names.
+The migration database role needs permission to install the extension (or an
+administrator must enable it first). Index creation runs during the normal
+migration transaction before the new backend starts; allow time for this on a
+large existing catalog. Existing catalog records need no reimport or backfill.

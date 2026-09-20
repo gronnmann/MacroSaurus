@@ -2,7 +2,10 @@ package com.macrosaurus.recipes.persistence
 
 import com.macrosaurus.shared.JsonCodec
 import com.macrosaurus.shared.NutrientValues
+import com.macrosaurus.shared.SearchHit
+import com.macrosaurus.shared.SearchStage
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import java.math.BigDecimal
 import java.time.OffsetDateTime
@@ -36,6 +39,70 @@ internal class JooqRecipeRepository(
     private val db: DSLContext,
     private val json: JsonCodec,
 ) {
+    fun searchHits(
+        userId: String,
+        query: String,
+        stage: SearchStage,
+        limit: Int,
+        includeIds: Collection<UUID>,
+    ): List<SearchHit> {
+        fun fetchHits(tx: DSLContext): List<SearchHit> {
+            val document = "search_normalize(rr.name)"
+            val candidate =
+                when (stage) {
+                    SearchStage.WORDS -> "$document ~ ('(^| )' || q.first_term || '( |$)')"
+                    SearchStage.PREFIX -> "$document ~ ('(^| )' || q.first_term)"
+                    SearchStage.TYPO -> "($document %>> q.first_term or $document ~ ('(^| )' || q.first_term || '( |$)'))"
+                }
+            return tx
+                .fetch(
+                    """
+                    with q as (
+                        select query, split_part(query, ' ', 1) as first_term
+                        from (select search_normalize(?) as query) normalized
+                    ), matches as (
+                        select r.id, rr.id as revision_id, rr.name,
+                               search_rank(rr.name, null, q.query, '${stage.name}') as rank,
+                               ${if (stage == SearchStage.TYPO) "search_similarity($document, q.query)" else "1.0::double precision"} as similarity,
+                               $document as sort_name
+                          from recipes r join recipe_revisions rr on rr.recipe_id = r.id cross join q
+                         where r.owner_user_id = ?
+                           and not exists (select 1 from recipe_revisions newer where newer.recipe_id = r.id and newer.revision > rr.revision)
+                           and q.query <> '' and $candidate
+                           and search_matches($document, q.query, '${stage.name}')
+                    ), ranked as (
+                        select *, row_number() over (order by rank, similarity desc, sort_name collate "C", id) as position
+                        from matches
+                    )
+                    select * from ranked where position <= ? or id = any(?::uuid[])
+                    order by position
+                    """.trimIndent(),
+                    query,
+                    userId,
+                    limit.coerceIn(1, 100),
+                    includeIds.toTypedArray(),
+                ).map { record ->
+                    SearchHit(
+                        record.get("id", UUID::class.java)!!,
+                        record.get("revision_id", UUID::class.java)!!,
+                        record.get("name", String::class.java)!!,
+                        record.get("rank", Int::class.java)!!,
+                        record.get("similarity", Double::class.java)!!,
+                        record.get("sort_name", String::class.java)!!,
+                    )
+                }
+        }
+        if (stage != SearchStage.TYPO) return fetchHits(db)
+        return db.transactionResult { configuration ->
+            val tx = DSL.using(configuration)
+            val previousThreshold = tx.fetchValue("select coalesce(current_setting('pg_trgm.strict_word_similarity_threshold', true), '0.5')")
+            tx.execute("set local pg_trgm.strict_word_similarity_threshold = 0.4")
+            val hits = fetchHits(tx)
+            tx.fetchValue("select set_config('pg_trgm.strict_word_similarity_threshold', ?, true)", previousThreshold)
+            hits
+        }
+    }
+
     fun latestRevisionIds(userId: String): List<UUID> =
         db
             .fetch(

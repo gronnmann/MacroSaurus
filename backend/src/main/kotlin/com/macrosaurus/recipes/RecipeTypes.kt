@@ -1,5 +1,7 @@
 package com.macrosaurus.recipes
 
+import com.macrosaurus.shared.SearchHit
+import com.macrosaurus.shared.SearchStage
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -31,6 +33,14 @@ data class RecipeSnapshot(
 )
 
 interface RecipeReader {
+    fun searchHits(
+        userId: String,
+        query: String,
+        stage: SearchStage,
+        limit: Int,
+        includeIds: Collection<UUID> = emptyList(),
+    ): List<SearchHit>
+
     fun list(userId: String): List<RecipeSnapshot>
 
     fun get(

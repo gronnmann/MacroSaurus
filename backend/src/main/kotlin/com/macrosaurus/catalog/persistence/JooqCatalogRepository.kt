@@ -10,7 +10,10 @@ import com.macrosaurus.catalog.domain.FoodDraftValidator
 import com.macrosaurus.shared.ForbiddenException
 import com.macrosaurus.shared.JsonCodec
 import com.macrosaurus.shared.NotFoundException
+import com.macrosaurus.shared.SearchHit
+import com.macrosaurus.shared.SearchStage
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.jooq.impl.DSL.field
 import org.jooq.impl.DSL.table
 import org.springframework.stereotype.Repository
@@ -37,13 +40,11 @@ internal class JooqCatalogRepository(
                 )
             }
 
-    fun search(
+    fun browse(
         userId: String,
-        query: String,
         limit: Int,
-    ): List<FoodSnapshot> {
-        val term = "%${query.trim()}%"
-        return db
+    ): List<FoodSnapshot> =
+        db
             .fetch(
                 """
                 select distinct on (f.id) f.id, fr.id as revision_id, fr.revision, fr.name, fr.brand,
@@ -51,20 +52,113 @@ internal class JooqCatalogRepository(
                        fr.basis_type, fr.basis_amount, fr.basis_unit, fr.density_g_per_ml, fr.created_at
                   from foods f join food_revisions fr on fr.food_id = f.id
                   left join food_source_releases sr on sr.id = fr.source_release_id
-                 where (f.source_kind <> 'USER' or f.owner_user_id = ?)
-                   and f.active
-                   and (fr.name ilike ? or coalesce(fr.brand, '') ilike ? or coalesce(f.barcode, '') = ?
-                        or exists (select 1 from food_aliases a where a.food_id = f.id and a.name ilike ?))
-                 order by f.id, fr.revision desc
-                 limit ?
+                 where (f.source_kind <> 'USER' or f.owner_user_id = ?) and f.active
+                 order by f.id, fr.revision desc limit ?
                 """.trimIndent(),
                 userId,
-                term,
-                term,
-                query.trim(),
-                term,
                 limit.coerceIn(1, 100),
             ).let(::foodsFromRecords)
+
+    fun searchHits(
+        userId: String,
+        query: String,
+        stage: SearchStage,
+        limit: Int,
+        includeIds: Collection<UUID>,
+    ): List<SearchHit> {
+        fun fetchHits(tx: DSLContext): List<SearchHit> {
+            fun candidate(document: String): String =
+                when (stage) {
+                    SearchStage.WORDS -> "$document ~ ('(^| )' || q.first_term || '( |$)')"
+                    SearchStage.PREFIX -> "$document ~ ('(^| )' || q.first_term)"
+                    SearchStage.TYPO -> "($document %>> q.first_term or $document ~ ('(^| )' || q.first_term || '( |$)'))"
+                }
+
+            fun nameMatches(
+                alias: Boolean,
+                brandCandidate: Boolean = false,
+            ): String {
+                val label = if (alias) "a.name" else "fr.name"
+                val document = "search_normalize($label || ' ' || coalesce(fr.brand, ''))"
+                // Separate alias and brand candidates so each branch can use its own index.
+                val prefilter =
+                    candidate(
+                        when {
+                            !alias -> document
+                            brandCandidate -> "search_normalize(fr.brand)"
+                            else -> "search_normalize(a.name)"
+                        },
+                    )
+                return """
+                    select f.id, fr.id as revision_id, fr.name,
+                           search_rank($label, fr.brand, q.query, '${stage.name}') as rank,
+                           ${if (stage == SearchStage.TYPO) "search_similarity($document, q.query)" else "1.0::double precision"} as similarity,
+                           search_normalize(fr.name) as sort_name
+                      from foods f join food_revisions fr on fr.food_id = f.id
+                      ${if (alias) "join food_aliases a on a.food_id = f.id" else ""}
+                      cross join q
+                     where f.active and (f.source_kind <> 'USER' or f.owner_user_id = ?)
+                       and not exists (select 1 from food_revisions newer where newer.food_id = f.id and newer.revision > fr.revision)
+                       and q.query <> '' and $prefilter
+                       and search_matches($document, q.query, '${stage.name}')
+                    """.trimIndent()
+            }
+            return tx
+                .fetch(
+                    """
+                    with q as (
+                        select query, split_part(query, ' ', 1) as first_term
+                        from (select search_normalize(?) as query) normalized
+                    ), matches as (
+                        ${nameMatches(false)}
+                        union all
+                        ${nameMatches(true)}
+                        union all
+                        ${nameMatches(true, brandCandidate = true)}
+                        union all
+                        select f.id, fr.id as revision_id, fr.name, -1 as rank,
+                               1.0::double precision as similarity, search_normalize(fr.name) as sort_name
+                          from foods f join food_revisions fr on fr.food_id = f.id
+                         where f.active and (f.source_kind <> 'USER' or f.owner_user_id = ?)
+                           and f.barcode = ? and f.barcode <> ''
+                           and not exists (select 1 from food_revisions newer where newer.food_id = f.id and newer.revision > fr.revision)
+                    ), best as (
+                        select distinct on (id) * from matches order by id, rank, similarity desc
+                    ), ranked as (
+                        select *, row_number() over (order by rank, similarity desc, sort_name collate "C", id) as position
+                        from best
+                    )
+                    select * from ranked where position <= ? or id = any(?::uuid[])
+                    order by position
+                    """.trimIndent(),
+                    query,
+                    userId,
+                    userId,
+                    userId,
+                    userId,
+                    query.trim(),
+                    limit.coerceIn(1, 100),
+                    includeIds.toTypedArray(),
+                ).map { record ->
+                    SearchHit(
+                        record.get("id", UUID::class.java)!!,
+                        record.get("revision_id", UUID::class.java)!!,
+                        record.get("name", String::class.java)!!,
+                        record.get("rank", Int::class.java)!!,
+                        record.get("similarity", Double::class.java)!!,
+                        record.get("sort_name", String::class.java)!!,
+                    )
+                }
+        }
+        if (stage != SearchStage.TYPO) return fetchHits(db)
+        return db.transactionResult { configuration ->
+            val tx = DSL.using(configuration)
+            val previousThreshold = tx.fetchValue("select coalesce(current_setting('pg_trgm.strict_word_similarity_threshold', true), '0.5')")
+            tx.execute("set local pg_trgm.strict_word_similarity_threshold = 0.4")
+            val hits = fetchHits(tx)
+            tx.fetchValue("select set_config('pg_trgm.strict_word_similarity_threshold', ?, true)", previousThreshold)
+            hits
+        }
     }
 
     fun get(

@@ -1,6 +1,8 @@
 package com.macrosaurus.catalog
 
 import com.macrosaurus.shared.NutrientValues
+import com.macrosaurus.shared.SearchHit
+import com.macrosaurus.shared.SearchStage
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -85,6 +87,14 @@ interface NutrientCatalog {
 }
 
 interface FoodCatalog {
+    fun searchHits(
+        userId: String,
+        query: String,
+        stage: SearchStage,
+        limit: Int,
+        includeIds: Collection<UUID> = emptyList(),
+    ): List<SearchHit>
+
     fun search(
         userId: String,
         query: String,

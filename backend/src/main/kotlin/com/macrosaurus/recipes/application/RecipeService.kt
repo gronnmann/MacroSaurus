@@ -10,6 +10,8 @@ import com.macrosaurus.recipes.persistence.JooqRecipeRepository
 import com.macrosaurus.recipes.persistence.StoredRecipeIngredient
 import com.macrosaurus.shared.NotFoundException
 import com.macrosaurus.shared.NutrientValues
+import com.macrosaurus.shared.SearchHit
+import com.macrosaurus.shared.SearchStage
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
@@ -36,6 +38,14 @@ internal class RecipeService(
     private val catalog: FoodCatalog,
     private val foodResolver: FoodResolver,
 ) : RecipeReader {
+    override fun searchHits(
+        userId: String,
+        query: String,
+        stage: SearchStage,
+        limit: Int,
+        includeIds: Collection<UUID>,
+    ): List<SearchHit> = repository.searchHits(userId, query, stage, limit, includeIds)
+
     override fun list(userId: String): List<RecipeSnapshot> = repository.latestRevisionIds(userId).map { getByRevision(userId, it) }
 
     override fun get(

@@ -55,6 +55,12 @@ class MigrationUpgradeIT {
                     """.trimIndent(),
                 ),
             ).isEqualTo("FASTING")
+
+            migrate(postgres, "10")
+            assertThat(postgres.queryString("select search_normalize('  SMØR, uten SALT ')")).isEqualTo("smør uten salt")
+            assertThat(postgres.queryInt("select count(*) from pg_extension where extname = 'pg_trgm'")).isEqualTo(1)
+            assertThat(postgres.queryInt("select count(*) from pg_indexes where indexname in ('food_revisions_search_idx', 'food_revisions_brand_search_idx', 'food_aliases_search_idx', 'recipe_revisions_search_idx')"))
+                .isEqualTo(4)
         } finally {
             postgres.stop()
         }

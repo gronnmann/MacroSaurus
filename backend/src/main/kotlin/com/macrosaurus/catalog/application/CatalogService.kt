@@ -12,6 +12,8 @@ import com.macrosaurus.catalog.ResolvedFoodAmount
 import com.macrosaurus.catalog.SourceKind
 import com.macrosaurus.catalog.domain.FoodAmountResolver
 import com.macrosaurus.catalog.persistence.JooqCatalogRepository
+import com.macrosaurus.shared.SearchHit
+import com.macrosaurus.shared.SearchStage
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -29,7 +31,25 @@ internal class CatalogService(
         userId: String,
         query: String,
         limit: Int,
-    ): List<FoodSnapshot> = repository.search(userId, query, limit)
+    ): List<FoodSnapshot> {
+        if (query.isBlank()) return repository.browse(userId, limit)
+        for (stage in SearchStage.entries) {
+            val hits = searchHits(userId, query, stage, limit)
+            if (hits.isNotEmpty()) {
+                val foods = byRevisions(userId, hits.map { it.revisionId })
+                return hits.map { foods.getValue(it.revisionId) }
+            }
+        }
+        return emptyList()
+    }
+
+    override fun searchHits(
+        userId: String,
+        query: String,
+        stage: SearchStage,
+        limit: Int,
+        includeIds: Collection<UUID>,
+    ): List<SearchHit> = repository.searchHits(userId, query, stage, limit, includeIds)
 
     override fun get(
         userId: String,

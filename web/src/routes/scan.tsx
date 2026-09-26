@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { BarcodeFormat, BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
-import { Camera, FileImage, Keyboard, ScanLine, X } from 'lucide-react'
+import { Camera, FileImage, Keyboard, ScanLine } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { BarcodeCamera } from '../components/barcode-camera'
 import { FoodForm } from '../components/food-form'
 import { PhotoInput } from '../components/photo-input'
 import {
@@ -17,6 +17,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
+import { barcodeError } from '../lib/barcode'
 import { prepareLabelImage } from '../lib/image'
 import type { Food, FoodInput } from '../types'
 
@@ -49,11 +50,17 @@ export function ScanExperience({
     })
     const [code, setCode] = useState('')
     const [camera, setCamera] = useState(false)
-    const [cameraError, setCameraError] = useState('')
     const [codeError, setCodeError] = useState('')
     const [searchedCode, setSearchedCode] = useState('')
-    const video = useRef<HTMLVideoElement>(null)
-    const controls = useRef<IScannerControls | undefined>(undefined)
+    const active = useRef(true)
+    const importing = useRef(false)
+    useEffect(() => {
+        active.current = true
+        return () => {
+            active.current = false
+        }
+    }, [])
+    const closeCamera = useCallback(() => setCamera(false), [])
     const navigate = useNavigate()
     const toast = useToast()
     const features = useQuery({ queryKey: queryKeys.features, queryFn: api.features })
@@ -62,24 +69,21 @@ export function ScanExperience({
     )
     const importer = useMutation({
         mutationFn: api.importBarcode,
+        networkMode: 'always',
         onSuccess: (food) => {
+            if (!active.current) return
             toast.push('Product ready')
             if (onFoodReady) onFoodReady(food)
             else navigate(`/track?food=${food.id}`)
         },
-        onError: (error) => toast.push('Could not add product', error.message, 'error'),
-    })
-    const lookup = useMutation({
-        mutationFn: api.barcode,
-        onSuccess: (candidates, barcode) => {
-            setSearchedCode(barcode)
-            if (candidates.length > 0) importer.mutate(barcode)
-        },
-        onError: (_error, barcode) => {
-            setSearchedCode(barcode)
-            toast.push('Online lookup failed', 'You can still create this food manually.', 'error')
+        onSettled: () => {
+            importing.current = false
         },
     })
+    const notFound =
+        importer.error instanceof Error &&
+        'problem' in importer.error &&
+        (importer.error.problem as { status?: number }).status === 404
     const scan = useMutation({
         mutationFn: async (file: File) =>
             api.startScan({
@@ -87,7 +91,10 @@ export function ScanExperience({
                 barcode: code || null,
                 localeHint: navigator.language,
             }),
-        onSuccess: (job) => (embedded ? setReviewId(job.id) : navigate(`/scan/${job.id}`)),
+        onSuccess: (job) => {
+            setCamera(false)
+            embedded ? setReviewId(job.id) : navigate(`/scan/${job.id}`)
+        },
         onError: (error) => toast.push('Could not read label', error.message, 'error'),
     })
 
@@ -99,51 +106,20 @@ export function ScanExperience({
 
     const lookUp = useCallback(
         (raw: string) => {
+            if (importing.current) return
             const value = raw.replace(/\D/g, '')
             const error = barcodeError(value)
             setCode(value)
             setCodeError(error)
-            if (!error) lookup.mutate(value)
-        },
-        [lookup.mutate],
-    )
-
-    useEffect(() => {
-        if (!camera || !video.current) return
-        const reader = new BrowserMultiFormatReader()
-        reader.possibleFormats = [
-            BarcodeFormat.EAN_8,
-            BarcodeFormat.EAN_13,
-            BarcodeFormat.UPC_A,
-            BarcodeFormat.UPC_E,
-            BarcodeFormat.ITF,
-        ]
-        let cancelled = false
-        reader
-            .decodeFromConstraints(
-                { video: { facingMode: { ideal: 'environment' } } },
-                video.current,
-                (result) => {
-                    if (result && !cancelled) {
-                        controls.current?.stop()
-                        setCamera(false)
-                        lookUp(result.getText())
-                    }
-                },
-            )
-            .then((value) => {
-                controls.current = value
-            })
-            .catch((error) => {
-                setCameraError(error instanceof Error ? error.message : 'Camera access was denied')
+            if (!error) {
                 setCamera(false)
-            })
-        return () => {
-            cancelled = true
-            controls.current?.stop()
-            controls.current = undefined
-        }
-    }, [camera, lookUp])
+                setSearchedCode(value)
+                importing.current = true
+                importer.mutate(value)
+            }
+        },
+        [importer.mutate],
+    )
 
     if (reviewId)
         return <ScanReview id={reviewId} onFoodReady={onFoodReady} onBack={() => setReviewId('')} />
@@ -179,37 +155,24 @@ export function ScanExperience({
             <Card tone="dark" className="barcode-card">
                 <SectionHeader eyebrow="BARCODE" title="Find the product" aside={<ScanLine />} />
                 {camera ? (
-                    <div className="camera-view">
-                        <video ref={video} muted playsInline />
-                        <span>Hold the barcode inside the frame</span>
-                        <Button
-                            variant="secondary"
-                            onClick={() => {
-                                controls.current?.stop()
-                                setCamera(false)
-                            }}
-                        >
-                            <X />
-                            Stop camera
-                        </Button>
-                    </div>
+                    <BarcodeCamera onDetected={lookUp} onClose={closeCamera} />
                 ) : (
                     <div className="scan-start">
                         <ScanLine />
-                        <h3>Ready to scan</h3>
+                        <h3>{importer.isPending ? 'Barcode found' : 'Ready to scan'}</h3>
                         <p>
                             Camera images stay on this device. Only the barcode number is looked up.
                         </p>
                         <Button
+                            disabled={importer.isPending}
                             onClick={() => {
-                                setCameraError('')
+                                importer.reset()
                                 setCamera(true)
                             }}
                         >
                             <Camera />
                             Open camera
                         </Button>
-                        {cameraError && <p className="field-error">{cameraError}</p>}
                     </div>
                 )}
                 <div className="manual-code">
@@ -217,6 +180,7 @@ export function ScanExperience({
                     <input
                         aria-label="Enter barcode"
                         inputMode="numeric"
+                        disabled={importer.isPending}
                         value={code}
                         onChange={(event) => {
                             setCode(event.target.value.replace(/\D/g, ''))
@@ -226,7 +190,7 @@ export function ScanExperience({
                     />
                     <Button
                         variant="secondary"
-                        disabled={!code || lookup.isPending}
+                        disabled={!code || importer.isPending}
                         onClick={() => lookUp(code)}
                     >
                         Look up
@@ -234,8 +198,23 @@ export function ScanExperience({
                 </div>
                 {codeError && <p className="field-error">{codeError}</p>}
             </Card>
-            {(lookup.isPending || importer.isPending) && <Skeleton lines={3} />}
-            {searchedCode === code && (lookup.data?.length === 0 || lookup.isError) && (
+            {importer.isPending && (
+                <>
+                    <p role="status">Barcode found — finding product…</p>
+                    <Skeleton lines={3} />
+                </>
+            )}
+            {searchedCode === code && importer.isError && !notFound && (
+                <Card>
+                    <p role="alert">
+                        {navigator.onLine
+                            ? 'Product lookup failed. Your barcode is retained; try again.'
+                            : 'Barcode found. Reconnect to look up the product.'}
+                    </p>
+                    <Button onClick={() => lookUp(code)}>Retry lookup</Button>
+                </Card>
+            )}
+            {searchedCode === code && notFound && (
                 <Card className="label-fallback">
                     <SectionHeader
                         eyebrow="NO MATCH"
@@ -247,7 +226,14 @@ export function ScanExperience({
                         then add the values from the package.
                     </p>
                     {embedded ? (
-                        <Button onClick={() => setManual(true)}>Create food manually</Button>
+                        <Button
+                            onClick={() => {
+                                setCamera(false)
+                                setManual(true)
+                            }}
+                        >
+                            Create food manually
+                        </Button>
                     ) : (
                         <Link
                             className="button button--primary"
@@ -417,14 +403,4 @@ function ScanReview({
             />
         </>
     )
-}
-
-function barcodeError(code: string) {
-    if (![8, 12, 13, 14].includes(code.length)) return 'Enter an 8, 12, 13, or 14 digit barcode.'
-    const check = [...code.slice(0, -1)]
-        .reverse()
-        .reduce((sum, digit, index) => sum + Number(digit) * (index % 2 === 0 ? 3 : 1), 0)
-    return (10 - (check % 10)) % 10 === Number(code.at(-1))
-        ? ''
-        : 'That barcode number is not valid. Try scanning again.'
 }

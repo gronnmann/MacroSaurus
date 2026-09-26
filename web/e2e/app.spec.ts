@@ -224,8 +224,13 @@ async function mockApi(page: Page) {
             path === '/api/v1/food-revisions/food-revision-1'
         )
             data = banana
-        else if (path.startsWith('/api/v1/barcodes/')) data = []
-        else if (path === '/api/v1/weight-measurements')
+        else if (path.startsWith('/api/v1/barcodes/')) {
+            await route.fulfill({
+                status: 404,
+                json: { status: 404, detail: 'Barcode was not found' },
+            })
+            return
+        } else if (path === '/api/v1/weight-measurements')
             data =
                 method === 'POST'
                     ? {

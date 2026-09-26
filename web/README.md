@@ -48,7 +48,7 @@ project URL and publishable key documented in
 Install the isolated browser once before the first end-to-end run:
 
 ```powershell
-pnpm --dir web exec playwright install chromium
+pnpm --dir web exec playwright install chromium webkit
 ```
 
 All dependency changes must use pnpm. Do not create `package-lock.json` or run

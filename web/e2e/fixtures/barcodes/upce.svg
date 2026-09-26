@@ -1,0 +1,7 @@
+<svg width="201" height="165" version="1.1" xmlns="http://www.w3.org/2000/svg">
+ <title>Zint Generated Symbol</title>
+ <g id="barcode" fill="#000000">
+  <rect x="0" y="0" width="201" height="165" fill="#FFFFFF"/>
+  <path d="M27 0h3v165h-3ZM33 0h3v165h-3ZM42 0h9v150h-9ZM54 0h3v150h-3ZM63 0h3v150h-3ZM72 0h6v150h-6ZM81 0h9v150h-9ZM96 0h3v150h-3ZM105 0h6v150h-6ZM114 0h6v150h-6ZM123 0h3v150h-3ZM129 0h12v150h-12ZM147 0h6v150h-6ZM159 0h3v150h-3ZM165 0h3v165h-3ZM171 0h3v165h-3ZM177 0h3v165h-3Z"/>
+ </g>
+</svg>

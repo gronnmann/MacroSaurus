@@ -1017,36 +1017,46 @@
     color: var(--white);
 }
 .camera-view {
-    position: relative;
     overflow: hidden;
     border-radius: 14px;
 }
-.camera-view video {
-    width: 100%;
-    min-height: 280px;
-    object-fit: cover;
+.camera-preview {
+    position: relative;
+    line-height: 0;
+    overflow: hidden;
 }
-.camera-view::after {
+.camera-preview video {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+.camera-guide {
     position: absolute;
     inset: 20% 10%;
     border: 3px solid var(--lime-400);
     border-radius: 14px;
-    content: "";
     box-shadow: 0 0 0 999px rgb(0 0 0 / 0.35);
+    pointer-events: none;
 }
-.camera-view span {
-    position: absolute;
-    z-index: 2;
-    right: 0;
-    bottom: 70px;
-    left: 0;
+.camera-view > p {
     color: white;
     text-align: center;
 }
-.camera-view .button {
-    position: relative;
-    z-index: 2;
-    margin-top: 0.5rem;
+.camera-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem;
+}
+.camera-controls label {
+    display: grid;
+    gap: 0.25rem;
+    max-width: 100%;
+}
+.camera-controls select {
+    max-width: 100%;
 }
 .upload-zone {
     display: grid;

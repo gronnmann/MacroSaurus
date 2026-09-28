@@ -235,14 +235,18 @@ describe('mobile tracking amount', () => {
         api.trackables.mockResolvedValue([{ ...trackable, type: 'RECIPE', name: 'Milk shake' }])
         api.recipeRevision.mockResolvedValue({
             servings: 4,
+            explicitYieldG: 800,
+            nutrientsPerServing: { energy_kcal: 100 },
+            nutrientsPer100G: { energy_kcal: 50 },
             ingredients: [{ foodRevisionId: food.revisionId, quantity: 800, unit: 'g' }],
         })
         const addIngredients = vi.fn()
         const user = setupSheet(addIngredients)
         await user.click(await screen.findByRole('button', { name: /Milk shake/ }))
-        await waitFor(() => expect(screen.getByLabelText('Servings')).toHaveValue('1'))
-        await user.clear(screen.getByLabelText('Servings'))
-        await user.type(screen.getByLabelText('Servings'), '2')
+        await waitFor(() => expect(screen.getByLabelText('Amount')).toHaveValue('1'))
+        expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument()
+        await user.clear(screen.getByLabelText('Amount'))
+        await user.type(screen.getByLabelText('Amount'), '2')
         await user.click(screen.getByRole('button', { name: 'Add ingredient' }))
         await waitFor(() =>
             expect(addIngredients).toHaveBeenCalledWith([
@@ -250,6 +254,52 @@ describe('mobile tracking amount', () => {
             ]),
         )
         expect(api.addRecipeEntry).not.toHaveBeenCalled()
+    })
+
+    it('edits and tracks a weighted recipe in grams', async () => {
+        api.trackables.mockResolvedValue([
+            {
+                ...trackable,
+                id: 'recipe-id',
+                revisionId: 'recipe-revision-id',
+                type: 'RECIPE',
+                name: 'Milk shake',
+                nutrients: { energy_kcal: 200, protein_g: 12 },
+            },
+        ])
+        api.recipeRevision.mockResolvedValue({
+            id: 'recipe-id',
+            revisionId: 'recipe-revision-id',
+            name: 'Milk shake',
+            servings: 2,
+            explicitYieldG: 400,
+            nutrientsPerServing: { energy_kcal: 200, protein_g: 12 },
+            nutrientsPer100G: { energy_kcal: 100, protein_g: 6 },
+            ingredients: [],
+        })
+        const user = setupSheet()
+
+        await user.click(await screen.findByRole('button', { name: /Milk shake/ }))
+
+        const edit = await screen.findByRole('link', { name: 'Edit' })
+        expect(edit).toHaveAttribute('href', '/recipes/recipe-id/edit')
+        await user.click(screen.getByRole('button', { name: 'grams' }))
+        await user.clear(screen.getByLabelText('Amount'))
+        await user.type(screen.getByLabelText('Amount'), '150')
+        await waitFor(() => expect(screen.getByText('150')).toBeVisible())
+        expect(screen.getByText('9 g')).toBeVisible()
+
+        await user.click(screen.getByRole('button', { name: 'Add to Food Log' }))
+
+        await waitFor(() =>
+            expect(api.addRecipeEntry).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    recipeRevisionId: 'recipe-revision-id',
+                    quantity: 150,
+                    unit: 'g',
+                }),
+            ),
+        )
     })
 
     it('shows nutrition for the entered amount before adding it', async () => {

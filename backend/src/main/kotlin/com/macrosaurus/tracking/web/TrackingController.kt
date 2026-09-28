@@ -1,6 +1,7 @@
 package com.macrosaurus.tracking.web
 
 import com.macrosaurus.shared.CurrentUser
+import com.macrosaurus.shared.InvalidOperationException
 import com.macrosaurus.tracking.DiaryEntrySnapshot
 import com.macrosaurus.tracking.DiaryEntryType
 import com.macrosaurus.tracking.NutritionDayReview
@@ -100,7 +101,9 @@ data class QuickTrackRequest(
 
 data class AddRecipeEntryRequest(
     val recipeRevisionId: UUID,
-    @field:DecimalMin("0.000001") val servings: BigDecimal,
+    @field:DecimalMin("0.000001") val quantity: BigDecimal? = null,
+    val unit: String? = null,
+    @field:DecimalMin("0.000001") val servings: BigDecimal? = null,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
 )
@@ -148,6 +151,17 @@ private fun LastTrackedAmount.toView() = LastTrackedAmountView(quantity, unit, p
 private fun TimeOfDaySuggestions.toView() = TimeOfDaySuggestionsView(anchorHour, items.map { it.toView() })
 
 private fun QuickTrackResultContract.toView() = QuickTrackResult(entry.toView(), calculatedCalories, calorieDiscrepancy, savedFoodId)
+
+private fun AddRecipeEntryRequest.toCommand(): AddRecipeEntryCommand {
+    val enteredQuantity = quantity ?: servings ?: throw InvalidOperationException("Recipe quantity is required")
+    val enteredUnit =
+        if (quantity != null) {
+            unit?.takeIf { it.isNotBlank() } ?: throw InvalidOperationException("Recipe unit is required")
+        } else {
+            "serving"
+        }
+    return AddRecipeEntryCommand(recipeRevisionId, enteredQuantity, enteredUnit, localDate, consumedAt)
+}
 
 @RestController
 @RequestMapping("/api/v1")
@@ -226,10 +240,8 @@ internal class TrackingController(
     fun addRecipe(
         @Valid @RequestBody request: AddRecipeEntryRequest,
     ) = tracking
-        .addRecipe(
-            users.userId(),
-            AddRecipeEntryCommand(request.recipeRevisionId, request.servings, request.localDate, request.consumedAt),
-        ).toView()
+        .addRecipe(users.userId(), request.toCommand())
+        .toView()
 
     @PutMapping("/diary-entries/{id}")
     fun update(

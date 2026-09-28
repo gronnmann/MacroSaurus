@@ -2990,6 +2990,10 @@
     margin: 0.2rem 0 0;
     color: var(--muted);
 }
+.selected-trackable-edit {
+    margin-left: auto;
+    white-space: nowrap;
+}
 .track-live-nutrition {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));

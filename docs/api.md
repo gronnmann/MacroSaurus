@@ -245,7 +245,7 @@ Resolve 1.5 scoops:
 | `GET` | `/diary-days?from={date}&to={date}` | Up to 93 inclusive days |
 | `PUT` | `/diary-days/{date}/analysis` | Confirm, estimate, exclude, or mark a day as fasting for coaching |
 | `POST` | `/diary-entries/food` | Track a resolved food amount |
-| `POST` | `/diary-entries/recipe` | Track recipe servings |
+| `POST` | `/diary-entries/recipe` | Track a recipe in servings or grams |
 | `POST` | `/quick-entries` | Track macros without requiring a food |
 | `DELETE` | `/diary-entries/{entryId}` | Delete owned entry |
 | `PUT` | `/diary-entries/{entryId}` | Edit timing and type-specific values |
@@ -265,6 +265,22 @@ Track 118 g of a food:
   "consumedAt": "2026-08-17T08:15:00+02:00"
 }
 ```
+
+Track 180 g of a recipe whose revision has an explicit or estimated yield:
+
+```json
+{
+  "recipeRevisionId": "<recipe revision UUID>",
+  "quantity": 180,
+  "unit": "g",
+  "localDate": "2026-08-17",
+  "consumedAt": "2026-08-17T12:30:00+02:00"
+}
+```
+
+Recipe units are `serving` and `g`. Gram tracking requires the recipe revision to
+have either a finished weight or a complete estimated ingredient weight. The
+legacy `servings` field remains accepted as a serving quantity.
 
 Quick track:
 

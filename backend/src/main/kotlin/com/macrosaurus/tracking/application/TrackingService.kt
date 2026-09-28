@@ -92,7 +92,8 @@ internal data class QuickTrackCommand(
 
 internal data class AddRecipeEntryCommand(
     val recipeRevisionId: UUID,
-    val servings: BigDecimal,
+    val quantity: BigDecimal,
+    val unit: String,
     val localDate: LocalDate,
     val consumedAt: OffsetDateTime? = null,
 )
@@ -231,20 +232,20 @@ internal class TrackingService(
         request: AddRecipeEntryCommand,
     ): DiaryEntrySnapshot {
         val recipe = recipes.getByRevision(userId, request.recipeRevisionId)
-        val nutrients = NutrientValues(recipe.nutrientsPerServing).scaled(request.servings)
+        val resolved = resolveRecipeAmount(recipe, request.quantity, request.unit)
         val id = UUID.randomUUID()
         insert(
             id,
             userId,
             request.localDate,
             request.consumedAt ?: OffsetDateTime.now(clock),
-            recipe.name,
+            resolved.name,
             DiaryEntryType.RECIPE,
             request.recipeRevisionId,
-            request.servings,
-            "serving",
+            resolved.quantity,
+            resolved.unit,
             null,
-            nutrients,
+            resolved.nutrients,
         )
         return entry(userId, id)
     }
@@ -267,10 +268,10 @@ internal class TrackingService(
                 }
 
                 DiaryEntryType.RECIPE -> {
-                    val servings = request.quantity ?: throw InvalidOperationException("Recipe servings are required")
+                    val quantity = request.quantity ?: throw InvalidOperationException("Recipe quantity is required")
                     val revisionId = current.sourceRevisionId ?: throw InvalidOperationException("Recipe revision is missing")
                     val recipe = recipes.getByRevision(userId, revisionId)
-                    UpdatedEntry(recipe.name, servings, "serving", null, NutrientValues(recipe.nutrientsPerServing).scaled(servings))
+                    resolveRecipeAmount(recipe, quantity, request.unit ?: current.unit ?: "serving")
                 }
 
                 DiaryEntryType.QUICK -> {
@@ -546,10 +547,14 @@ internal class TrackingService(
             }
 
             TrackableType.RECIPE -> {
-                recipes.getByRevision(userId, revisionId)
-                repository
-                    .findLatestTrackedAmount(userId, DiaryEntryType.RECIPE, revisionId)
-                    ?.let { LastTrackedAmount(it.quantity, "serving", null) }
+                val recipe = recipes.getByRevision(userId, revisionId)
+                repository.findLatestTrackedAmount(userId, DiaryEntryType.RECIPE, revisionId)?.let { latest ->
+                    when (latest.unit.lowercase()) {
+                        "serving" -> LastTrackedAmount(latest.quantity, "serving", null)
+                        "g" -> recipe.nutrientsPer100G?.let { LastTrackedAmount(latest.quantity, "g", null) }
+                        else -> null
+                    }
+                }
             }
 
             TrackableType.ALL -> {
@@ -720,6 +725,31 @@ internal class TrackingService(
     ): DiaryDay {
         val totals = entries.fold(NutrientValues.EMPTY) { total, entry -> total.plus(NutrientValues(entry.nutrients)) }
         return DiaryDay(date, entries, totals.values)
+    }
+
+    private fun resolveRecipeAmount(
+        recipe: RecipeSnapshot,
+        quantity: BigDecimal,
+        unit: String,
+    ): UpdatedEntry {
+        if (quantity <= BigDecimal.ZERO) throw InvalidOperationException("Recipe quantity must be greater than zero")
+        val normalizedUnit = unit.trim().lowercase()
+        val nutrients =
+            when (normalizedUnit) {
+                "serving" -> {
+                    NutrientValues(recipe.nutrientsPerServing).scaled(quantity)
+                }
+
+                "g" -> {
+                    val per100G = recipe.nutrientsPer100G ?: throw InvalidOperationException("This recipe has no weight for gram tracking")
+                    NutrientValues(per100G).scaled(quantity.movePointLeft(2))
+                }
+
+                else -> {
+                    throw InvalidOperationException("Recipe unit must be serving or g")
+                }
+            }
+        return UpdatedEntry(recipe.name, quantity, normalizedUnit, null, nutrients)
     }
 
     private data class UpdatedEntry(

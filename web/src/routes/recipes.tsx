@@ -22,6 +22,7 @@ import {
     useToast,
 } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
+import { recipeNutrients, recipeUnits } from '../lib/recipe-amount'
 import { formatNumber, kcal, parseDecimal } from '../lib/utils'
 import type { Food, Recipe, RecipeInput } from '../types'
 import { foodUnits, type IngredientSelection, TrackSheet } from './track'
@@ -71,7 +72,7 @@ export function RecipeDetailPage() {
                     />
                 </Card>
                 <Card tone="green">
-                    <SectionHeader eyebrow="ADD TO FOOD LOG" title="Choose servings" />
+                    <SectionHeader eyebrow="ADD TO FOOD LOG" title="Choose amount" />
                     <RecipeLogger recipe={item} />
                     <div className="yield-stats">
                         <div>
@@ -113,15 +114,18 @@ export function RecipeDetailPage() {
 }
 
 function RecipeLogger({ recipe }: { recipe: Recipe }) {
-    const [servings, setServings] = useState(1)
+    const [quantity, setQuantity] = useState(1)
+    const [unit, setUnit] = useState<'serving' | 'g'>('serving')
     const [when, setWhen] = useState(initialTrackingWhen)
     const toast = useToast()
     const client = useQueryClient()
+    const nutrients = recipeNutrients(recipe, quantity, unit)
     const log = useMutation({
         mutationFn: () =>
             api.addRecipeEntry({
                 recipeRevisionId: recipe.revisionId,
-                servings,
+                quantity,
+                unit,
                 ...trackingTimestamp(when),
             }),
         onSuccess: () => {
@@ -138,21 +142,34 @@ function RecipeLogger({ recipe }: { recipe: Recipe }) {
                 log.mutate()
             }}
         >
-            <Field label="Servings">
-                <DecimalInput value={servings} onValue={(value) => setServings(value ?? 0)} />
+            <Field label="Amount">
+                <DecimalInput value={quantity} onValue={(value) => setQuantity(value ?? 0)} />
+            </Field>
+            <Field label="Unit">
+                <select
+                    value={unit}
+                    onChange={(event) => setUnit(event.target.value as 'serving' | 'g')}
+                >
+                    {recipeUnits(recipe).map((option) => (
+                        <option key={option.value} value={option.value}>
+                            {option.label}
+                        </option>
+                    ))}
+                </select>
             </Field>
             <div className="preview-macros">
-                <strong>{Math.round(kcal(recipe.nutrientsPerServing) * servings)} kcal</strong>
+                <strong>{Math.round(kcal(nutrients))} kcal</strong>
                 <span>
-                    P {formatNumber(recipe.nutrientsPerServing.protein_g * servings)} · C{' '}
-                    {formatNumber(recipe.nutrientsPerServing.carbohydrate_g * servings)} · F{' '}
-                    {formatNumber(recipe.nutrientsPerServing.fat_g * servings)}
+                    P {formatNumber(nutrients?.protein_g)} · C{' '}
+                    {formatNumber(nutrients?.carbohydrate_g)} · F {formatNumber(nutrients?.fat_g)}
                 </span>
             </div>
             <TrackingWhenFields value={when} onChange={setWhen} />
             <Button
                 type="submit"
-                disabled={log.isPending || !Number.isFinite(servings) || servings <= 0}
+                disabled={
+                    log.isPending || !Number.isFinite(quantity) || quantity <= 0 || !nutrients
+                }
             >
                 Add to Food Log
             </Button>
@@ -222,7 +239,10 @@ export function RecipeEditorPage() {
         mutationFn: (input: RecipeInput) =>
             id ? api.updateRecipe(id, input) : api.createRecipe(input),
         onSuccess: (result) => {
+            client.setQueryData(queryKeys.recipe(result.id), result)
             client.invalidateQueries({ queryKey: queryKeys.recipes })
+            client.invalidateQueries({ queryKey: ['trackables'] })
+            client.invalidateQueries({ queryKey: ['time-of-day-suggestions'] })
             toast.push(id ? 'Changes saved' : 'Recipe created')
             navigate(`/recipes/${result.id}`)
         },

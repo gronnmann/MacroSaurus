@@ -5,6 +5,7 @@ import {
     Camera,
     ChevronRight,
     MoreHorizontal,
+    Pencil,
     Scale,
     Search,
     Sparkles,
@@ -28,8 +29,9 @@ import { Button, Field, Skeleton, StatePanel, useToast } from '../components/ui'
 import { api, queryKeys } from '../lib/api'
 import { readQuickNutrients } from '../lib/nutrient-fields'
 import { createQuickFood, type QuickFoodInput } from '../lib/quick-food'
+import { recipeBatchFraction, recipeNutrients, recipeUnits } from '../lib/recipe-amount'
 import { formatNumber, kcal, parseDecimal } from '../lib/utils'
-import type { Food, FoodInput, Nutrients, Trackable } from '../types'
+import type { AddRecipeEntryInput, Food, FoodInput, Nutrients, Trackable } from '../types'
 import { MealEstimateEntry } from './meal-estimate'
 import { ScanExperience } from './scan'
 
@@ -463,6 +465,11 @@ function AmountForm({
         queryFn: () => api.foodRevision(item.revisionId),
         enabled: item.type === 'FOOD',
     })
+    const recipe = useQuery({
+        queryKey: ['recipe-revision', item.revisionId],
+        queryFn: () => api.recipeRevision(item.revisionId),
+        enabled: item.type === 'RECIPE',
+    })
     const lastAmount = useQuery({
         queryKey: queryKeys.lastTrackedAmount(item.type, item.revisionId),
         queryFn: () => api.lastTrackedAmount(item.type, item.revisionId),
@@ -473,7 +480,8 @@ function AmountForm({
         if (
             initialized.current ||
             (!onIngredients && lastAmount.isPending) ||
-            (item.type === 'FOOD' && !food.data)
+            (item.type === 'FOOD' && !food.data) ||
+            (item.type === 'RECIPE' && !recipe.data)
         )
             return
         initialized.current = true
@@ -495,7 +503,7 @@ function AmountForm({
             setUnitChoice('serving')
         }
         setAmountReady(true)
-    }, [food.data, item.type, lastAmount.data, lastAmount.isPending, onIngredients])
+    }, [food.data, item.type, lastAmount.data, lastAmount.isPending, onIngredients, recipe.data])
     const numericQuantity = parseDecimal(quantity)
     const portionId = unitChoice.startsWith('portion:') ? unitChoice.slice(8) : ''
     const unit = portionId ? 'portion' : unitChoice
@@ -517,7 +525,9 @@ function AmountForm({
     const preview = !amountReady
         ? undefined
         : item.type === 'RECIPE'
-          ? scaleNutrients(item.nutrients, numericQuantity)
+          ? recipe.data
+              ? recipeNutrients(recipe.data, numericQuantity, unit)
+              : undefined
           : resolved.data?.nutrients
     const add = useMutation({
         mutationFn: async (payload: unknown) => {
@@ -532,11 +542,13 @@ function AmountForm({
                         },
                     ])
                 else {
-                    const recipe = await api.recipeRevision(item.revisionId)
+                    if (!recipe.data) throw new Error('Recipe details are still loading')
+                    const factor = recipeBatchFraction(recipe.data, numericQuantity, unit)
+                    if (factor === undefined) throw new Error('This recipe cannot use that unit')
                     const ingredients = await Promise.all(
-                        recipe.ingredients.map(async (ingredient) => ({
+                        recipe.data.ingredients.map(async (ingredient) => ({
                             food: await api.foodRevision(ingredient.foodRevisionId),
-                            quantity: (ingredient.quantity * numericQuantity) / recipe.servings,
+                            quantity: ingredient.quantity * factor,
                             unit: ingredient.unit,
                             portionId: ingredient.portionId,
                         })),
@@ -545,7 +557,9 @@ function AmountForm({
                 }
                 return
             }
-            return item.type === 'FOOD' ? api.addFoodEntry(payload) : api.addRecipeEntry(payload)
+            return item.type === 'FOOD'
+                ? api.addFoodEntry(payload)
+                : api.addRecipeEntry(payload as AddRecipeEntryInput)
         },
         onSuccess: () => {
             client.invalidateQueries({ queryKey: ['diary'] })
@@ -570,10 +584,11 @@ function AmountForm({
             add.mutate({
                 ...common,
                 recipeRevisionId: item.revisionId,
-                servings: numericQuantity,
+                quantity: numericQuantity,
+                unit,
             })
     }
-    const units = food.data ? foodUnits(food.data) : []
+    const units = food.data ? foodUnits(food.data) : recipe.data ? recipeUnits(recipe.data) : []
     return (
         <form className="track-amount" onSubmit={submit}>
             <button type="button" className="sheet-back" onClick={onBack}>
@@ -587,11 +602,23 @@ function AmountForm({
                     <h2>{item.name}</h2>
                     <p>{item.brand || (item.type === 'RECIPE' ? 'Recipe' : 'Food')}</p>
                 </div>
+                {item.type === 'RECIPE' && !onIngredients && (
+                    <Link
+                        className="button button--secondary selected-trackable-edit"
+                        to={`/recipes/${item.id}/edit`}
+                    >
+                        <Pencil />
+                        Edit
+                    </Link>
+                )}
             </div>
-            {food.isError && (
+            {(food.isError || recipe.isError) && (
                 <p role="alert" className="field-error">
-                    Could not load this food.{' '}
-                    <Button variant="secondary" onClick={() => food.refetch()}>
+                    Could not load this {item.type === 'FOOD' ? 'food' : 'recipe'}.{' '}
+                    <Button
+                        variant="secondary"
+                        onClick={() => (item.type === 'FOOD' ? food.refetch() : recipe.refetch())}
+                    >
                         Try again
                     </Button>
                 </p>
@@ -599,7 +626,7 @@ function AmountForm({
             <LiveNutrition nutrients={preview} pending={!amountReady || resolved.isFetching} />
             {!onIngredients && <TrackingWhenFields value={when} onChange={onWhenChange} />}
             <div className="track-amount-entry">
-                <Field label={item.type === 'FOOD' ? 'Amount' : 'Servings'}>
+                <Field label="Amount">
                     <input
                         name="quantity"
                         type="text"
@@ -609,7 +636,7 @@ function AmountForm({
                         onChange={(event) => setQuantity(event.target.value)}
                     />
                 </Field>
-                {item.type === 'FOOD' && (
+                {units.length > 0 && (
                     <fieldset className="track-unit-picker">
                         <legend>Unit</legend>
                         <div>
@@ -640,7 +667,7 @@ function AmountForm({
                         add.isPending ||
                         !Number.isFinite(numericQuantity) ||
                         numericQuantity <= 0 ||
-                        (item.type === 'FOOD' && !preview)
+                        !preview
                     }
                 >
                     {add.isPending
@@ -695,12 +722,6 @@ export function foodUnits(food: Food) {
         units.push({ value: `portion:${portion.id}`, label: portion.name })
     })
     return units
-}
-
-function scaleNutrients(nutrients: Nutrients, factor: number): Nutrients {
-    return Object.fromEntries(
-        Object.entries(nutrients).map(([code, value]) => [code, value * factor]),
-    )
 }
 
 function trackableFood(food: Food): Trackable {

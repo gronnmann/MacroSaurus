@@ -1,4 +1,5 @@
 import type {
+    AddRecipeEntryInput,
     AdminUser,
     BarcodeCandidate,
     CheckIn,
@@ -149,7 +150,7 @@ export const api = {
         request('/quick-entries', { method: 'POST', body: body(input) }),
     addFoodEntry: (input: unknown) =>
         request('/diary-entries/food', { method: 'POST', body: body(input) }),
-    addRecipeEntry: (input: unknown) =>
+    addRecipeEntry: (input: AddRecipeEntryInput) =>
         request('/diary-entries/recipe', { method: 'POST', body: body(input) }),
     updateDiaryEntry: (id: string, input: UpdateDiaryEntryInput) =>
         request<DiaryEntry>(`/diary-entries/${id}`, {

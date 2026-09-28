@@ -19,6 +19,7 @@ import com.macrosaurus.measurements.application.MeasurementService
 import com.macrosaurus.recipes.application.RecipeIngredientCommand
 import com.macrosaurus.recipes.application.RecipeService
 import com.macrosaurus.recipes.application.SaveRecipeCommand
+import com.macrosaurus.shared.InvalidOperationException
 import com.macrosaurus.shared.NotFoundException
 import com.macrosaurus.sharing.application.CreateShareCommand
 import com.macrosaurus.sharing.application.ShareResourceType
@@ -26,8 +27,10 @@ import com.macrosaurus.sharing.application.SharingService
 import com.macrosaurus.tracking.NutritionDayReview
 import com.macrosaurus.tracking.NutritionDayStatus
 import com.macrosaurus.tracking.application.AddFoodEntryCommand
+import com.macrosaurus.tracking.application.AddRecipeEntryCommand
 import com.macrosaurus.tracking.application.TrackableType
 import com.macrosaurus.tracking.application.TrackingService
+import com.macrosaurus.tracking.application.UpdateDiaryEntryCommand
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -210,6 +213,95 @@ class BackendPersistenceIT {
         assertThat(tracking.trackables(userId, "", TrackableType.FOOD, 30).first().id).isEqualTo(revised.id)
         assertThat(tracking.lastTrackedAmount(userId, TrackableType.FOOD, revised.revisionId)?.quantity)
             .isEqualByComparingTo("2")
+    }
+
+    @Test
+    fun `recipes track grams from explicit and estimated yields`() {
+        val userId = "weighted-recipe-user"
+        val food =
+            foodCreator.create(
+                userId,
+                FoodDraft(
+                    name = "Weighted ingredient",
+                    basisType = BasisType.PER_100_G,
+                    basisAmount = BigDecimal("100"),
+                    basisUnit = "g",
+                    nutrients = mapOf("energy_kcal" to BigDecimal("200"), "protein_g" to BigDecimal("10")),
+                ),
+            )
+        val explicit =
+            recipes.create(
+                userId,
+                SaveRecipeCommand(
+                    name = "Cooked batch",
+                    servings = BigDecimal("2"),
+                    finishedWeightG = BigDecimal("160"),
+                    ingredients = listOf(RecipeIngredientCommand(food.revisionId, BigDecimal("200"), "g", null)),
+                ),
+            )
+        val date = LocalDate.of(2026, 9, 28)
+        val gramEntry =
+            tracking.addRecipe(
+                userId,
+                AddRecipeEntryCommand(explicit.revisionId, BigDecimal("40"), "g", date),
+            )
+        assertThat(gramEntry.quantity).isEqualByComparingTo("40")
+        assertThat(gramEntry.unit).isEqualTo("g")
+        assertThat(gramEntry.nutrients["protein_g"]).isEqualByComparingTo("5")
+        assertThat(tracking.lastTrackedAmount(userId, TrackableType.RECIPE, explicit.revisionId)?.unit).isEqualTo("g")
+
+        val updated =
+            tracking.update(
+                userId,
+                gramEntry.id,
+                UpdateDiaryEntryCommand(date, OffsetDateTime.parse("2026-09-28T12:00:00+02:00"), BigDecimal.ONE, "serving"),
+            )
+        assertThat(updated.quantity).isEqualByComparingTo("1")
+        assertThat(updated.unit).isEqualTo("serving")
+        assertThat(updated.nutrients["protein_g"]).isEqualByComparingTo("10")
+
+        val estimated =
+            recipes.create(
+                userId,
+                SaveRecipeCommand(
+                    name = "Raw batch",
+                    servings = BigDecimal("2"),
+                    finishedWeightG = null,
+                    ingredients = listOf(RecipeIngredientCommand(food.revisionId, BigDecimal("200"), "g", null)),
+                ),
+            )
+        val estimatedEntry =
+            tracking.addRecipe(
+                userId,
+                AddRecipeEntryCommand(estimated.revisionId, BigDecimal("50"), "g", date),
+            )
+        assertThat(estimatedEntry.nutrients["protein_g"]).isEqualByComparingTo("5")
+
+        val servingOnlyFood =
+            foodCreator.create(
+                userId,
+                FoodDraft(
+                    name = "Unweighted ingredient",
+                    basisType = BasisType.PER_SERVING,
+                    basisAmount = BigDecimal.ONE,
+                    basisUnit = "serving",
+                    nutrients = mapOf("energy_kcal" to BigDecimal("100")),
+                ),
+            )
+        val unweighted =
+            recipes.create(
+                userId,
+                SaveRecipeCommand(
+                    name = "Unweighted batch",
+                    servings = BigDecimal.ONE,
+                    finishedWeightG = null,
+                    ingredients = listOf(RecipeIngredientCommand(servingOnlyFood.revisionId, BigDecimal.ONE, "serving", null)),
+                ),
+            )
+        assertThatThrownBy {
+            tracking.addRecipe(userId, AddRecipeEntryCommand(unweighted.revisionId, BigDecimal("50"), "g", date))
+        }.isInstanceOf(InvalidOperationException::class.java)
+            .hasMessage("This recipe has no weight for gram tracking")
     }
 
     @Test

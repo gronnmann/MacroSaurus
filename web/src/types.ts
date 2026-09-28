@@ -139,6 +139,14 @@ export interface RecipeInput {
     }>
 }
 
+export interface AddRecipeEntryInput {
+    recipeRevisionId: string
+    quantity: number
+    unit: 'serving' | 'g'
+    localDate: string
+    consumedAt?: string
+}
+
 export interface Profile {
     userId: string
     displayName: string

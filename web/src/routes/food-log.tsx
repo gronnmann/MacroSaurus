@@ -318,7 +318,10 @@ function EntryEditor({
                 portionId: data.get('portionId') || null,
             })
         if (entry.entryType === 'RECIPE')
-            Object.assign(base, { quantity: parseDecimal(data.get('quantity')) })
+            Object.assign(base, {
+                quantity: parseDecimal(data.get('quantity')),
+                unit: String(data.get('unit')),
+            })
         if (entry.entryType === 'QUICK')
             Object.assign(base, {
                 name: data.get('name'),
@@ -396,15 +399,25 @@ function FoodFields({ entry, food }: { entry: DiaryEntry; food?: Food }) {
 }
 function RecipeFields({ entry, recipe }: { entry: DiaryEntry; recipe?: Recipe }) {
     return (
-        <Field className="span-2" label={`Servings${recipe ? ` of ${recipe.name}` : ''}`}>
-            <input
-                name="quantity"
-                type="text"
-                inputMode="decimal"
-                required
-                defaultValue={entry.quantity}
-            />
-        </Field>
+        <>
+            <Field label={`Amount${recipe ? ` of ${recipe.name}` : ''}`}>
+                <input
+                    name="quantity"
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    defaultValue={entry.quantity}
+                />
+            </Field>
+            <Field label="Unit">
+                <select name="unit" defaultValue={entry.unit || 'serving'}>
+                    <option value="serving">servings</option>
+                    {(entry.unit === 'g' || recipe?.nutrientsPer100G) && (
+                        <option value="g">grams</option>
+                    )}
+                </select>
+            </Field>
+        </>
     )
 }
 function QuickFields({ entry }: { entry: DiaryEntry }) {
